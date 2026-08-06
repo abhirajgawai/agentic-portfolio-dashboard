@@ -17,6 +17,10 @@ data/*.db
 data/*.db-journal
 data/*.db-shm
 data/*.db-wal
+data/logs/
+
+# Live personal portfolio data - the M8 export carries real holdings/values.
+dashboard/public/data/
 
 # Raw samples that accidentally captured credentials. Safe/pinned samples
 # (holdings/quotes only, tokens redacted) ARE committed for regression.

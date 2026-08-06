@@ -46,7 +46,7 @@ the how and the why at every step. Follow this rhythm for each piece of work:
 |---|---|---|---|
 | Zerodha | IN | hosted MCP `https://mcp.kite.trade/mcp` | MCP `login` tool, manual daily browser login |
 | Groww | IN | custom FastMCP → official REST Trade API (`growwapi` SDK) | `API_AUTH_TOKEN`, manual daily login (verify lifetime) |
-| Moomoo | US | hosted MCP `https://mcp.moomoo.com/mcp` (OAuth) | OAuth refresh token, auto-refresh |
+| Moomoo | US | OpenD gateway + `moomoo-api` SDK wrapped in our read-only FastMCP (`moomoo_mcp/`); hosted MCP `https://mcp.moomoo.com/mcp` is market-data-only (OAuth grants just `quote:read` to dynamic clients) | OpenD desktop login (manual) + trade password in `data/tokens.json` |
 
 ## Non-negotiable guardrails (enforced in code, not just policy)
 
@@ -75,6 +75,13 @@ deploy. Snapshotting starts in M1 (time-series value compounds with age).
 ## Verification
 
 - `uv run ruff check .` and `uv run pytest` before declaring work done.
+- **Tests are written only when they earn their place.** Do not blanket-add unit
+  tests for every new function or refactor. Write a test when it guards something
+  genuinely fragile (an integration boundary, a data-shape contract like a pinned
+  sample, a bug we actually hit, a UNIQUE-key dedupe invariant) or when it is the
+  fastest way to verify a tricky fix. Prefer running the real pipeline / CLI against
+  live fixtures as the primary check; add a test only if a regression is likely or
+  the logic is subtle. When a test IS needed, keep it small and targeted.
 - Each milestone has a `✅ Done when:` bar in `PLAN.md` — meet it explicitly.
 - Use the project agents (`.opencode/agent/`) for phase-specific work and the skills
   (`.opencode/skill/`) for phase-specific procedures. Load the matching skill before

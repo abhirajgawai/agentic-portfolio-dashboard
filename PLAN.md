@@ -107,12 +107,36 @@ so **Groww gets a custom FastMCP wrapper**. Token
 lifetime (spec assumes daily ~6 AM) must be verified against the docs after getting the
 key — the docs are a JS app, not scrapable anonymously.
 
-**Moomoo — hosted MCP confirmed live.** `https://mcp.moomoo.com/mcp` returns **401
-Unauthorized** (real, OAuth-protected endpoint; root path 404s). Fallback if the hosted
-MCP proves limited: Moomoo OpenAPI via the **OpenD gateway** (local daemon, Windows
-supported) + official Python SDK — also the basis of the best community MCP
-(`Litash/moomoo-api-mcp`, Python, actively maintained). Decide during M2 spike; prefer
-hosted MCP.
+**Moomoo — hosted MCP is market-data-only; OpenD gateway is the holdings path (spike
+conclusion, verified live 2026-08-06).** The hosted MCP `https://mcp.moomoo.com/mcp` is a
+standard MCP-OAuth server: RFC 8414 discovery at
+`/.well-known/oauth-authorization-server` (authorize + token + dynamic-registration
+endpoints on `webapi.moomoo.com`), RFC 9728 protected-resource metadata at
+`/.well-known/oauth-protected-resource`, scopes `quote:read quote:write trade:read
+trade:write accid:*`, PKCE S256, `authorization_code` + `refresh_token` grants, and
+`/mcp` returns 401 with `WWW-Authenticate: Bearer resource_metadata=...` unauthenticated.
+The `mcp` SDK's `OAuthClientProvider` completes the whole flow automatically (discovery →
+dynamic client registration → PKCE → token storage → auto-refresh).
+
+**But the AS only grants `quote:read` to dynamically-registered clients.** Three separate
+consents, each explicitly requesting `quote:read trade:read accid:*`, each returned a
+token with scope `quote:read` only. With that token: `initialize`, `tools/list`, and all
+`quote_*` market-data tools work (88-tool inventory captured to `samples/moomoo/_tools.json`);
+the account tools (`account_authorized_trd_accs`, `account_positions`, `account_funds`)
+401 with `{"error":"invalid_token","error_description":"access token expired or invalid,
+please re-authorize"}`. Trade/account scopes are evidently reserved for approved OpenAPI
+applications, not anonymous dynamic registration.
+
+**Design consequence (adopted for M2):** holdings come from the **OpenD gateway** (local
+desktop app, Windows supported, holds the Moomoo login like the Zerodha daemon holds the
+Kite session) via the official `moomoo-api` SDK (v10.9, `pip install moomoo-api`), wrapped
+in our own **read-only FastMCP server** (`moomoo_mcp/server.py`, same pattern as the Groww
+wrapper). Tools: `get_accounts`, `get_positions`, `get_funds` — order tools are never
+registered. The `unlock_trade` step reads the trading password from gitignored
+`data/tokens.json` at startup and never exposes it as a tool argument. The hosted-MCP
+OAuth client (`portfolio/tokens/moomoo_oauth.py`) remains as a documented integration
+(and a market-data source for M5/M6) but is not the holdings path. Community reference:
+`Litash/moomoo-api-mcp` (Python, actively maintained).
 
 **opencode guardrail mechanism (corrected):** opencode's `permission` config covers
 built-in tools only (read/edit/bash/webfetch/…). **MCP tools are controlled via the
@@ -241,16 +265,20 @@ Tokens live in `data/tokens.json` (gitignored), never in the DB or snapshots.
   duplicate; expired session produces a notification, not a crash.
 
 ### M2 — Moomoo + consolidated view (2–3 evenings)
-- Spike first: connect to `https://mcp.moomoo.com/mcp` (confirmed live, OAuth-protected).
-  If tool coverage is insufficient, fall back to OpenD gateway + official Python SDK
-  wrapped in a local FastMCP (community reference: `Litash/moomoo-api-mcp`).
-- One-time OAuth consent (PKCE + local redirect capture) → persist refresh_token;
-  auto-refresh the short-lived access token inside the client on expiry/401.
-- US normalizer (geography US, currency USD).
-- FX module: one INR/USD (+SGD) rate per run, source + rate persisted to `fx_rates`.
-  Source candidates (pick one, must be deterministic + free): open.er-api.com (no key),
-  exchangerate.host, or RBI daily reference rates.
-- Consolidated allocation computation in INR base.
+- **Spike (DONE, 2026-08-06):** connected to `https://mcp.moomoo.com/mcp` end-to-end —
+  OAuth discovery, dynamic registration, PKCE consent, token refresh all work; **88-tool
+  inventory captured** (`samples/moomoo/_tools.json`). **Conclusion:** the AS grants only
+  `quote:read` to dynamic clients (3 consents, 3x `quote:read`), so the hosted MCP is
+  market-data-only — account tools 401. **Holdings therefore come from the OpenD gateway
+  fallback** (`moomoo_mcp/` read-only FastMCP over `moomoo-api`, §2b).
+- One-time OpenD setup: install the desktop app, log in (manual), store the trade
+  password via `portfolio auth --platform moomoo` (gitignored `data/tokens.json`).
+- US normalizer (geography US, currency USD) — reuses the Futu PositionInfo field names
+  (`code`/`qty`/`cost_price`/`nominal_price`/`market_val`), verified against a live sample.
+- FX module: one INR/USD (+SGD) rate per run via open.er-api.com (keyless, deterministic),
+  persisted to `fx_rates`. Process-wide cache enforces one fetch per run.
+- Consolidated allocation in INR base: geography / platform / sector / asset_class each
+  sum to 100% (`normalize/allocation.py`).
 - ✅ Done when: `portfolio snapshot --all` reconciles with both broker UIs; consolidated
   allocation sums to 100%.
 

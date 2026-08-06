@@ -1,0 +1,44 @@
+ticker,sector,asset_class
+# ---- Moomoo (US) ----
+GOOGL,Technology,equity
+IAU,Gold,etf
+IBM,Technology,equity
+MU,Semiconductors,equity
+SMH,Semiconductors,etf
+VOO,US Large Cap,etf
+# ---- Zerodha (India) ----
+ADANIPOWER,Power,equity
+AFFLE,Media & Entertainment,equity
+APARINDS,Industrial Equipment,equity
+BAJFINANCE,Financial Services,equity
+CAMS,Financial Services,equity
+CAPLIPOINT,Pharmaceuticals,equity
+CDSL,Financial Services,equity
+CGPOWER,Electrical Equipment,equity
+CMSINFO,Financial Services,equity
+CUMMINSIND,Industrials,equity
+DEEPAKNTR,Chemicals,equity
+EIDPARRY,Agri & Sugar,equity
+ETERNAL,Consumer Packaging,equity
+GPIL,Steel,equity
+HCLTECH,Information Technology,equity
+HDFCBANK,Banking,equity
+INFY,Information Technology,equity
+INOXINDIA,Industrials,equity
+IONEXCHANG,Water & Environment,equity
+IRCTC,Travel & Tourism,equity
+IREDA,Financial Services,equity
+IRFC,Financial Services,equity
+JIOFIN,Financial Services,equity
+KPITTECH,Information Technology,equity
+LT,Infrastructure,equity
+MON100,International Equity,etf
+PFC,Financial Services,equity
+PRICOLLTD,Consumer Packaging,equity
+RVNL,Infrastructure,equity
+SONACOMS,Auto Components,equity
+SPLPETRO,Chemicals,equity
+SUPREMEIND,Consumer Packaging,equity
+WAAREEENER,Renewables,equity
+WABAG,Water & Environment,equity
+ZENTEC,Information Technology,equity

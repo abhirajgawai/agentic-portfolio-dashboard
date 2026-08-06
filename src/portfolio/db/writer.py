@@ -56,17 +56,32 @@ def update_run(conn: Any, run_id: int, status: str, rows: int, error: str | None
 
 # ---- dimensions ------------------------------------------------------------
 
-def ensure_account(conn: Any, platform: str, label: str | None = None, account_ref: str = "") -> int:
-    """Return the account id for (platform, account_ref), creating it once."""
+def ensure_account(
+    conn: Any,
+    platform: str,
+    label: str | None = None,
+    account_ref: str = "",
+    base_currency: str = "INR",
+) -> int:
+    """Return the account id for (platform, account_ref), creating it once.
+
+    base_currency is the account's DISPLAY currency (zerodha -> INR,
+    moomoo -> SGD); the global consolidation base is separate.
+    """
     row = conn.execute(
         "SELECT id FROM account WHERE platform=? AND account_ref=?",
         (platform, account_ref),
     ).fetchone()
     if row is not None:
+        conn.execute(
+            "UPDATE account SET base_currency=COALESCE(?,base_currency), label=COALESCE(?,label) WHERE id=?",
+            (base_currency, label, row["id"]),
+        )
+        conn.commit()
         return row["id"]
     cur = conn.execute(
-        "INSERT INTO account (platform, account_ref, label) VALUES (?,?,?)",
-        (platform, account_ref, label or platform),
+        "INSERT INTO account (platform, account_ref, label, base_currency) VALUES (?,?,?,?)",
+        (platform, account_ref, label or platform, base_currency),
     )
     conn.commit()
     return cur.lastrowid
@@ -153,21 +168,24 @@ def upsert_position(
     cost_value_ccy: float | None,
     market_value_ccy: float,
     market_value_base: float,
+    cost_value_base: float | None,
     updated_at: str,
 ) -> None:
     """Live holdings: one row per (account, instrument), overwritten each poll."""
     conn.execute(
         """
         INSERT INTO position (account_id, instrument_id, quantity, avg_cost, price,
-                              cost_value_ccy, market_value_ccy, market_value_base, updated_at)
-        VALUES (?,?,?,?,?,?,?,?,?)
+                              cost_value_ccy, market_value_ccy, market_value_base,
+                              cost_value_base, updated_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(account_id, instrument_id) DO UPDATE SET
           quantity=excluded.quantity, avg_cost=excluded.avg_cost, price=excluded.price,
           cost_value_ccy=excluded.cost_value_ccy, market_value_ccy=excluded.market_value_ccy,
-          market_value_base=excluded.market_value_base, updated_at=excluded.updated_at
+          market_value_base=excluded.market_value_base, cost_value_base=excluded.cost_value_base,
+          updated_at=excluded.updated_at
         """,
         (account_id, instrument_id, quantity, avg_cost, price,
-         cost_value_ccy, market_value_ccy, market_value_base, updated_at),
+         cost_value_ccy, market_value_ccy, market_value_base, cost_value_base, updated_at),
     )
     conn.commit()
 
@@ -188,21 +206,25 @@ def upsert_position_snapshot(
     cost_value_ccy: float | None,
     market_value_ccy: float,
     market_value_base: float,
+    cost_value_base: float | None,
 ) -> None:
     """The daily ledger: one row per (date, account, instrument). EOD runs write these."""
     conn.execute(
         """
         INSERT INTO position_snapshot (run_id, account_id, instrument_id, fx_rate_id,
                                        snapshot_date, quantity, avg_cost, price,
-                                       cost_value_ccy, market_value_ccy, market_value_base)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                                       cost_value_ccy, market_value_ccy, market_value_base,
+                                       cost_value_base)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(snapshot_date, account_id, instrument_id) DO UPDATE SET
           run_id=excluded.run_id, quantity=excluded.quantity, avg_cost=excluded.avg_cost,
           price=excluded.price, cost_value_ccy=excluded.cost_value_ccy,
-          market_value_ccy=excluded.market_value_ccy, market_value_base=excluded.market_value_base
+          market_value_ccy=excluded.market_value_ccy, market_value_base=excluded.market_value_base,
+          cost_value_base=excluded.cost_value_base
         """,
         (run_id, account_id, instrument_id, fx_rate_id, snapshot_date,
-         quantity, avg_cost, price, cost_value_ccy, market_value_ccy, market_value_base),
+         quantity, avg_cost, price, cost_value_ccy, market_value_ccy, market_value_base,
+         cost_value_base),
     )
     conn.commit()
 

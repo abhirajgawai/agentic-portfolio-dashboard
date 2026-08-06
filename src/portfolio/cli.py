@@ -70,6 +70,74 @@ def serve(
     serve_mod.run(port=port)
 
 
+@app.command("auth")
+def auth(
+    platform: Annotated[str, typer.Option(help="moomoo (OpenD gateway setup)")] = "moomoo",
+) -> None:
+    """Set up the Moomoo leg: verify OpenD, store the trade password, test read.
+
+    Moomoo account data comes from the OpenD gateway (the desktop app holds the
+    login - see PLAN.md M2 spike findings). This command:
+      1. checks OpenD is reachable on 127.0.0.1:11111,
+      2. prompts for the trade password (unlock_trade) and stores it in the
+         gitignored token store,
+      3. runs one read-only end-to-end check (accounts + holdings count).
+    """
+    import asyncio
+
+    from portfolio.tokens import store
+
+    if platform != "moomoo":
+        raise typer.BadParameter("M2 supports only --platform moomoo")
+
+    if not _opend_reachable():
+        typer.echo(
+            "ERROR: OpenD is not running on 127.0.0.1:11111.\n"
+            "Install it from https://www.moomoo.com/download/opend, open the app,\n"
+            "and log in with your Moomoo account, then re-run this command.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    existing = store.platform_store("moomoo").get("trade_password")
+    typer.echo(f"OpenD reachable on 127.0.0.1:11111. Trade password: {'already stored' if existing else 'not set'}.")
+    password = typer.prompt("Moomoo trade password", hide_input=True, confirmation_prompt=False)
+    if not password:
+        typer.echo("no password given - keeping the existing configuration.", err=True)
+        raise typer.Exit(code=1)
+    store.set_platform_value("moomoo", "trade_password", password)
+
+    from portfolio.clients.moomoo import MoomooMCPClient
+    from portfolio.normalize.moomoo import normalize_holdings
+    from portfolio.snapshot import _pick_real_account
+
+    async def _check() -> str:
+        async with MoomooMCPClient() as client:
+            acc_res = await client.call("get_accounts")
+            if acc_res.is_error:
+                return f"FAILED: {acc_res.raw[:200]}"
+            acc_id = _pick_real_account(acc_res.json())
+            if acc_id is None:
+                return "FAILED: no REAL account in get_accounts"
+            pos_res = await client.call("get_positions", {"trd_env": "REAL", "acc_id": acc_id})
+            if pos_res.is_error:
+                return f"FAILED: {pos_res.raw[:200]}"
+            holdings = normalize_holdings(pos_res.json() or [])
+            return f"ok - REAL account {acc_id}: {len(holdings)} holdings readable"
+
+    typer.echo(asyncio.run(_check()))
+
+
+def _opend_reachable(host: str = "127.0.0.1", port: int = 11111) -> bool:
+    import socket
+
+    try:
+        with socket.create_connection((host, port), timeout=3):
+            return True
+    except OSError:
+        return False
+
+
 @app.command("snapshot")
 def snapshot(
     platform: Annotated[str, typer.Option(help="zerodha | moomoo | groww | all")] = "zerodha",

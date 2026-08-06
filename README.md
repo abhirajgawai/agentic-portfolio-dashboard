@@ -5,8 +5,11 @@ A personal, learning-first project that aggregates holdings across multiple brok
 Built phase by phase against a locked plan (`PLAN.md`); each phase is deterministic,
 tested, and verified before the next starts.
 
-> **Current status: M0 ✅ + M1 ✅** — scaffold + Zerodha end-to-end (live session daemon,
-> snapshot pipeline, relational SQLite schema v2). M2 (Moomoo + consolidated) is next.
+> **Current status: M0 ✅ + M1 ✅ + M2 ✅** — Moomoo holdings path decided by the
+> M2 spike: the hosted MCP grants only `quote:read` to dynamic OAuth clients (account tools
+> 401), so Moomoo holdings come from the **OpenD gateway** via our own read-only FastMCP
+> wrapper (`moomoo_mcp/`). FX (one rate/run), the US normalizer, and consolidated INR
+> allocation (sums to 100%) are built and verified live against the real account.
 
 ---
 
@@ -42,7 +45,10 @@ Task Scheduler ──> snapshot ─┤─> MCP client (allowlisted tools) ──
 Three brokers, three integration styles (the point of the project):
 - **Zerodha** (IN) — hosted MCP server `https://mcp.kite.trade/mcp`
 - **Groww** (IN) — official REST Trade API (`growwapi` SDK), wrapped in our own read-only FastMCP
-- **Moomoo** (US) — hosted MCP `https://mcp.moomoo.com/mcp` (OAuth)
+- **Moomoo** (US) — **OpenD gateway** (local desktop app holding the login) + official `moomoo-api`
+  SDK, wrapped in our own read-only FastMCP (`moomoo_mcp/`). The hosted MCP
+  `https://mcp.moomoo.com/mcp` was spike-tested and is **market-data only**: its OAuth token
+  endpoint grants just `quote:read` to dynamic clients, so account tools 401 (see `PLAN.md` §2b).
 
 ---
 
@@ -82,7 +88,25 @@ research trail.
 ```
 portfolio db migrate            apply pending SQL migrations (versioned)
 portfolio serve --platform zerodha   hold the day's session, serve read-only RPC (:8787)
+portfolio auth --platform moomoo     verify OpenD, store trade password, test read access
 portfolio snapshot --platform <zerodha|moomoo|groww|all> [--eod]
+```
+
+### Moomoo setup (one-time, OpenD gateway)
+
+Moomoo's hosted MCP only grants market-data scopes to OAuth clients (spike finding), so
+holdings come from the **OpenD** desktop gateway — the app holds your Moomoo login the way
+the Zerodha daemon holds the Kite session:
+
+```sh
+# 1. Install + open OpenD, log in with your Moomoo account
+#    (https://www.moomoo.com/download/opend) — it listens on 127.0.0.1:11111.
+# 2. Store the trade password (unlock_trade) + verify read access:
+uv run portfolio auth --platform moomoo
+# 3. Snapshot the US leg:
+uv run portfolio snapshot --platform moomoo
+# 4. Consolidated (INR base, allocation sums to 100%):
+uv run portfolio snapshot --platform all
 ```
 
 ---
@@ -92,9 +116,11 @@ portfolio snapshot --platform <zerodha|moomoo|groww|all> [--eod]
 SQLite at `data/portfolio.db` (gitignored). Two kinds of tables, by design:
 
 **State — current picture, upserted in place (never grows):**
-- `account` — one per broker account
+- `account` — one per broker account; `base_currency` is the account's **display**
+  currency (zerodha → INR, moomoo → SGD; the global consolidation base stays INR)
 - `instrument` — one row per (platform, ticker); the join key for everything
-- `position` — current qty/avg cost/value per instrument
+- `position` — current qty/avg cost/value per instrument, plus `cost_value_base`
+  (cost converted to INR at the run's fx rate, so return% is computable directly)
 
 **History — the daily ledger, written only on `--eod` runs (~35 rows/day):**
 - `position_snapshot` — per-holding EOD snapshot (FK to a `runs` row)
@@ -145,6 +171,9 @@ src/portfolio/
   config.py         env loading, platform registry
 scripts/probe_mcp.py   inspect-first: list tools, dump raw outputs to samples/
 samples/zerodha/        pinned MCP baselines (tool inventory, error shapes)
+samples/moomoo/         88-tool hosted-MCP inventory + spike diagnostics
+samples/fx/             pinned open.er-api.com response (USD/SGD rates)
+moomoo_mcp/             read-only FastMCP wrapper over the OpenD gateway
 data/                   gitignored: portfolio.db, tokens.json, holidays/
 tests/                  pytest — normalizers, migrations, writer, client allowlist
 ```

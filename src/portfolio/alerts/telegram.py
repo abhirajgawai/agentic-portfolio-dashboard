@@ -49,11 +49,15 @@ def send_telegram(
         return False
 
 
-def send_snapshot_expiry_warning(platform: str, reason: str, settings: Settings | None = None) -> bool:
+def send_snapshot_expiry_warning(
+    platform: str, reason: str, settings: Settings | None = None, action: str | None = None
+) -> bool:
     """M1 requirement: expired session -> Telegram warning, not a silent failure."""
+    if action is None:
+        action = f"run `portfolio serve --platform {platform}` and complete the browser login (2FA)."
     msg = (
         f"\u26a0\ufe0f Portfolio pipeline: {platform} session expired/invalid.\n"
         f"Reason: {reason}\n"
-        f"Action: run `portfolio serve --platform {platform}` and complete the browser login (2FA)."
+        f"Action: {action}"
     )
     return send_telegram(msg, settings=settings)

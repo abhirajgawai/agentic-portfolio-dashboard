@@ -40,17 +40,29 @@ class Settings:
         return self.get("TELEGRAM_CHAT_ID")
 
 
-# Platform registry: platform -> (geography, default currency)
+# Platform registry: platform -> (geography, settlement currency, display currency)
 # Token/session handling lives in src/portfolio/tokens/.
+#   currency         = the currency holdings are settled in (e.g. Moomoo holds USD
+#                      assets in a Singapore account).
+#   display_currency = the currency the account's leg is SHOWN in on the dashboard
+#                      (zerodha -> INR, moomoo -> SGD). The global consolidation
+#                      base stays Settings.base_currency (INR).
 PLATFORMS: dict[str, dict[str, str]] = {
-    "zerodha": {"geography": "IN", "currency": "INR"},
-    "groww": {"geography": "IN", "currency": "INR"},
-    "moomoo": {"geography": "US", "currency": "USD"},
+    "zerodha": {"geography": "IN", "currency": "INR", "display_currency": "INR"},
+    "groww": {"geography": "IN", "currency": "INR", "display_currency": "INR"},
+    "moomoo": {"geography": "US", "currency": "USD", "display_currency": "SGD"},
 }
 
 
 def platform_geography(platform: str) -> str:
     try:
         return PLATFORMS[platform]["geography"]
+    except KeyError as exc:
+        raise ValueError(f"unknown platform: {platform!r}") from exc
+
+
+def platform_display_currency(platform: str) -> str:
+    try:
+        return PLATFORMS[platform]["display_currency"]
     except KeyError as exc:
         raise ValueError(f"unknown platform: {platform!r}") from exc

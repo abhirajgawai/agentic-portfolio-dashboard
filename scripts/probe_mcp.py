@@ -8,6 +8,9 @@ Usage:
     uv run python scripts/probe_mcp.py --url https://mcp.kite.trade/mcp --platform zerodha
     uv run python scripts/probe_mcp.py --url https://mcp.moomoo.com/mcp --platform moomoo \
         --tools get_account_summary,get_holdings
+    # Moomoo is OAuth-protected: --auth moomoo starts the one-time consent flow
+    # (browser) if no valid token is stored, then auto-refreshes on demand.
+    uv run python scripts/probe_mcp.py --url https://mcp.moomoo.com/mcp --platform moomoo --auth moomoo
 
 NEVER calls order place/modify/cancel/GTT tools.
 """
@@ -37,20 +40,46 @@ def probe(
     platform: Annotated[str, typer.Option(help="platform name -> samples/<platform>/")],
     tools: Annotated[str | None, typer.Option(help="comma-separated tools to call")] = None,
     timeout: Annotated[float, typer.Option(help="per-call timeout seconds")] = 45.0,
+    auth: Annotated[str, typer.Option(help="auth mode: none | moomoo")] = "none",
 ) -> None:
     selected = [t.strip() for t in (tools or ",".join(DEFAULT_TOOLS)).split(",") if t.strip()]
-    asyncio.run(_probe(url, platform, selected, timeout))
+    asyncio.run(_probe(url, platform, selected, timeout, auth))
 
 
-async def _probe(url: str, platform: str, tools: list[str], timeout: float) -> None:
+async def _probe(url: str, platform: str, tools: list[str], timeout: float, auth: str) -> None:
     out_dir = Path("samples") / platform
     out_dir.mkdir(parents=True, exist_ok=True)
     redactor = SecretRedactionFilter()
 
-    async with streamable_http_client(url) as (read, write), ClientSession(read, write) as session:
+    http_client = None
+    if auth == "moomoo":
+        # OAuth provider (read-only scopes) + auto-refresh httpx2 client.
+        from portfolio.tokens.moomoo_oauth import (
+            build_auth_provider,
+            build_authenticated_client,
+            verify_granted_scope,
+        )
+
+        provider = build_auth_provider()
+        _last_provider = provider
+        http_client = build_authenticated_client(provider)
+        ok, detail = await _auth_status(provider)
+        print(f"[probe] moomoo auth: {ok} - {detail}")
+
+    async with streamable_http_client(url, http_client=http_client) as (read, write), ClientSession(read, write) as session:
         await session.initialize()
         server_info = getattr(session, "server_info", None)
         print(f"[probe] connected to {url}; server: {server_info}")
+
+        if auth == "moomoo":
+            # The initialize() above may have triggered the consent flow
+            # (401 -> provider -> browser). Verify what was granted.
+            provider = _last_provider
+            try:
+                tokens = await provider.context.storage.get_tokens()
+                verify_granted_scope(tokens.scope if tokens else None)
+            except Exception as exc:  # noqa: BLE001
+                print(f"[probe] scope check FAILED: {exc}")
 
         # 1) Tool inventory
         listed = await session.list_tools()
@@ -76,6 +105,16 @@ async def _probe(url: str, platform: str, tools: list[str], timeout: float) -> N
             except Exception as exc:  # noqa: BLE001 - probe must not die on one tool
                 _dump(out_dir / f"{name}.json", {"tool": name, "error": str(exc)}, redactor)
                 print(f"[probe] {name} FAILED: {type(exc).__name__}: {exc}")
+
+
+_last_provider = None
+
+
+async def _auth_status(provider) -> tuple[bool, str]:
+    tokens = await provider.context.storage.get_tokens()
+    if tokens is None:
+        return False, "no tokens stored - consent flow will start on first request"
+    return True, f"token stored, scope={tokens.scope or '(unspecified)'}"
 
 
 def _dump(path: Path, obj: dict, redactor: SecretRedactionFilter) -> None:

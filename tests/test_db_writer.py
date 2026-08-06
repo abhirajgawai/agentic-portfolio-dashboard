@@ -50,11 +50,13 @@ def test_upsert_position_in_place(conn) -> None:
     inst = writer.ensure_instrument(conn, "zerodha", "INFY", currency="INR")
     writer.upsert_position(
         conn, acc, inst, quantity=10, avg_cost=1500.0, price=1600.0,
-        cost_value_ccy=15000.0, market_value_ccy=16000.0, market_value_base=16000.0, updated_at="t1",
+        cost_value_ccy=15000.0, market_value_ccy=16000.0, market_value_base=16000.0,
+        cost_value_base=15000.0, updated_at="t1",
     )
     writer.upsert_position(
         conn, acc, inst, quantity=10, avg_cost=1500.0, price=1700.0,
-        cost_value_ccy=15000.0, market_value_ccy=17000.0, market_value_base=17000.0, updated_at="t2",
+        cost_value_ccy=15000.0, market_value_ccy=17000.0, market_value_base=17000.0,
+        cost_value_base=15000.0, updated_at="t2",
     )
     assert conn.execute("SELECT COUNT(*) FROM position").fetchone()[0] == 1
     assert conn.execute("SELECT price FROM position").fetchone()[0] == 1700.0
@@ -69,6 +71,7 @@ def test_upsert_position_snapshot_dedupes_per_day(conn) -> None:
             conn, run, acc, inst, None, "2026-08-06",
             quantity=10, avg_cost=1500.0, price=price,
             cost_value_ccy=15000.0, market_value_ccy=price * 10, market_value_base=price * 10,
+            cost_value_base=15000.0,
         )
     assert conn.execute("SELECT COUNT(*) FROM position_snapshot").fetchone()[0] == 1
     assert conn.execute("SELECT price FROM position_snapshot").fetchone()[0] == 1700.0
