@@ -1,0 +1,7 @@
+{
+  "A_initial_session_id": "kitemcp-be4d7bd6-b80c-4a5c-ba43-660034d3fa06",
+  "B_resumed_session_id": "kitemcp-7e1ee256-ee09-4930-8af4-5070181e51fc",
+  "resumption_ok": false,
+  "A_body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"protocolVersion\":\"2025-03-26\",\"capabilities\":{\"tools\":{\"listChanged\":true}},\"serverInfo\":{\"name\":\"Kite MCP Server\",\"version\":\"v0.3.2\"}}}\n",
+  "B_body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"protocolVersion\":\"2025-03-26\",\"capabilities\":{\"tools\":{\"listChanged\":true}},\"serverInfo\":{\"name\":\"Kite MCP Server\",\"version\":\"v0.3.2\"}}}\n"
+}

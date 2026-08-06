@@ -1,0 +1,24 @@
+[
+  {
+    "tradingsymbol": "INFY",
+    "exchange": "NSE",
+    "quantity": 10,
+    "average_price": 1500.0,
+    "last_price": 1610.0
+  },
+  {
+    "tradingsymbol": "SBIN",
+    "exchange": "NSE",
+    "quantity": 5,
+    "average_price": 700.0,
+    "last_price": 680.0,
+    "name": "State Bank of India"
+  },
+  {
+    "tradingsymbol": "TATAMOTORS",
+    "exchange": "NSE",
+    "quantity": 20,
+    "average_price": null,
+    "last_price": 950.0
+  }
+]

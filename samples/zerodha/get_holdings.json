@@ -1,0 +1,4 @@
+{
+  "tool": "get_holdings",
+  "content": "meta=None content=[TextContent(type='text', text='Please log in first using the login tool', annotations=None, meta=None)] structured_content=None is_error=True result_type='complete'"
+}

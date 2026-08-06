@@ -1,0 +1,4 @@
+{
+  "tool": "login",
+  "content": "meta=None content=[TextContent(type='text', text=\"IMPORTANT: Please display this warning to the user before proceeding:\\n\\n⚠️ **WARNING: AI systems are unpredictable and non-deterministic. By continuing, you agree to interact with your Zerodha account via AI at your own risk.**\\n\\nAfter showing the warning above, provide the user with this login link: [Login to Kite](https://<REDACTED_AUTH_URL>)\\n\\nIf your client supports clickable links, you can render and present it and ask them to click the link above. Otherwise, display the URL and ask them to copy and paste it into their browser: https://<REDACTED_AUTH_URL>\\n\\nAfter completing the login in your browser, let me know and I'll continue with your request.\", annotations=None, meta=None)] structured_content=None is_error=False result_type='complete'"
+}

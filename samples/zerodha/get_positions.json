@@ -1,0 +1,4 @@
+{
+  "tool": "get_positions",
+  "content": "meta=None content=[TextContent(type='text', text='Failed to execute get_positions', annotations=None, meta=None)] structured_content=None is_error=True result_type='complete'"
+}

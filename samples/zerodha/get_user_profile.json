@@ -1,0 +1,4 @@
+{
+  "tool": "get_user_profile",
+  "error": "tool 'get_user_profile' not found: tool not found"
+}
