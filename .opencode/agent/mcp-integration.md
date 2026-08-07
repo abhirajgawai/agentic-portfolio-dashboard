@@ -1,5 +1,5 @@
 ---
-description: Connects to broker MCP servers, lists tools, dumps raw outputs to samples/, and builds custom FastMCP wrappers (Groww, portfolio_data, Moomoo OpenD fallback). Use for M1-M3 and M7 MCP wiring.
+description: Connects to broker MCP servers, lists tools, dumps raw outputs to samples/, and builds custom FastMCP wrappers (portfolio_data, Moomoo OpenD fallback). Use for M1-M2 and M7 MCP wiring.
 mode: subagent
 permission:
   bash: ask
@@ -28,13 +28,22 @@ tools, captures raw response shapes, and builds thin read-only MCP servers.
   If tool coverage is insufficient, fall back to OpenD gateway + official Python SDK
   wrapped in a local FastMCP (reference: `Litash/moomoo-api-mcp`).
 
-## When building custom MCP servers (Groww, portfolio_data)
+## When building custom MCP servers (portfolio_data, Moomoo OpenD)
 - Use FastMCP over **stdio** for our local servers.
 - Expose ONLY read-only tools. **Never register** write/trade tools.
-- Groww wraps the official REST Trade API via the `growwapi` Python SDK
-  (`get_holdings`, `get_positions`, quotes) and needs a verified token lifetime.
-- Verify token lifetime from actual docs before building auth automation.
+- Groww has NO MCP: its ₹499/mo Trade API is equities-only (no mutual funds — PLAN
+  §2c) and was REMOVED. Groww holdings come from the free CAS import (`cas_import.py`,
+  MIT `casparser`) + AMFI NAV (`mf_nav.py`), not from any MCP server.
 
 ## Always
 - Report the exact tool inventory and which tools you allowlisted.
 - Note any OAuth requirements for the pipeline client to handle.
+
+## Reporting back (you are orchestrated)
+You were launched by the **orchestrator**. When finished, reply with exactly this shape so
+results can be aggregated across parallel workers:
+- **Files changed:** list of paths (incl. `samples/<platform>/*.json` captured)
+- **Built:** one line per deliverable
+- **Verified:** command(s) run + pass/fail + key numbers (tool inventory + allowlist)
+- **Blockers/decisions:** anything the orchestrator must resolve, or "none"
+Be concise and factual; do not restate the brief.

@@ -25,6 +25,10 @@ app = typer.Typer(
 )
 db_app = typer.Typer(help="Database commands.")
 app.add_typer(db_app, name="db")
+cas_app = typer.Typer(help="CAS (Consolidated Account Statement) import - Groww/IN holdings.")
+app.add_typer(cas_app, name="cas")
+nav_app = typer.Typer(help="AMFI NAV commands (daily MF price refresh).")
+app.add_typer(nav_app, name="nav")
 
 logger = logging.getLogger("portfolio.cli")
 
@@ -83,12 +87,12 @@ def auth(
          gitignored token store,
       3. runs one read-only end-to-end check (accounts + holdings count).
     """
+    if platform != "moomoo":
+        raise typer.BadParameter("auth supports only --platform moomoo")
+
     import asyncio
 
     from portfolio.tokens import store
-
-    if platform != "moomoo":
-        raise typer.BadParameter("M2 supports only --platform moomoo")
 
     if not _opend_reachable():
         typer.echo(
@@ -128,6 +132,61 @@ def auth(
     typer.echo(asyncio.run(_check()))
 
 
+@app.command("trades")
+def trades(
+    platform: Annotated[str, typer.Option(help="zerodha | moomoo | all")] = "all",
+) -> None:
+    """Capture today's trades for XIRR (daily; same-day history only on Kite)."""
+    from portfolio.snapshot import SessionNotReady
+    from portfolio.trades import capture_trades
+
+    try:
+        result = capture_trades(platform)
+    except SessionNotReady as exc:
+        typer.echo(f"trades capture {platform}: FAILED - {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    typer.echo(f"trades capture {platform}: {result}")
+
+
+@cas_app.command("import")
+def cas_import(
+    pdf: Annotated[str, typer.Argument(help="path to the CAS PDF (the original issuer file)")],
+    password: Annotated[str, typer.Option(help="CAS PDF password, if encrypted")] = "",
+    no_enrich: Annotated[bool, typer.Option("--no-enrich", help="skip AMFI scheme-name enrichment")] = False,
+) -> None:
+    """Parse a CAS PDF and persist holdings (stocks + MFs) to the DB.
+
+    Free, SEBI-mandated, emailed monthly. Covers CDSL/NSDL demat + CAMS/KFintech
+    folios. Folio MFs carry cost basis (returns computable); demat MFs and
+    equities are value-only until a cost source exists. Zerodha equities are
+    skipped (already captured live via MCP).
+    """
+    from portfolio.cas_import import import_cas
+
+    result = import_cas(pdf, password=password, enrich_names=not no_enrich)
+    typer.echo(f"cas import: {result}")
+
+
+@nav_app.command("refresh")
+def nav_refresh() -> None:
+    """Refresh CAS-derived MF + ETF prices from the official AMFI NAVAll.txt (daily, free, keyless).
+
+    One AMFI fetch per run. Updates every CAS-derived mutual fund AND ETF position's
+    price in `position` (Indian ETFs are open-ended schemes in the same feed), writes
+    a price_history + position_snapshot row for today, and logs a `runs` row
+    (platform='amfi'). Live-leg positions (zerodha/moomoo) are never touched; CAS
+    equities have no AMFI NAV and stay at the statement price until the next import.
+    """
+    from portfolio.mf_nav import NAVError, refresh_nav_prices
+
+    try:
+        result = refresh_nav_prices()
+    except NAVError as exc:
+        typer.echo(f"nav refresh: FAILED - {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    typer.echo(f"nav refresh: {result}")
+
+
 def _opend_reachable(host: str = "127.0.0.1", port: int = 11111) -> bool:
     import socket
 
@@ -140,7 +199,7 @@ def _opend_reachable(host: str = "127.0.0.1", port: int = 11111) -> bool:
 
 @app.command("snapshot")
 def snapshot(
-    platform: Annotated[str, typer.Option(help="zerodha | moomoo | groww | all")] = "zerodha",
+    platform: Annotated[str, typer.Option(help="zerodha | moomoo | all")] = "zerodha",
     eod: Annotated[bool, typer.Option(help="mark run as end-of-day")] = False,
 ) -> None:
     """Run a snapshot for a platform."""
@@ -150,6 +209,11 @@ def snapshot(
         result = run_snapshot(platform, is_eod=eod)
     except SessionNotReady as exc:
         typer.echo(f"snapshot {platform}: FAILED - {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    except Exception as exc:  # noqa: BLE001 - belt for unexpected bugs: a clean
+        # error + exit 1, never a raw traceback in a scheduled job's log.
+        logger.error("snapshot %s crashed: %s", platform, exc)
+        typer.echo(f"snapshot {platform}: FAILED - unexpected error: {exc}", err=True)
         raise typer.Exit(code=1) from exc
     typer.echo(f"snapshot {platform}: {result}")
 

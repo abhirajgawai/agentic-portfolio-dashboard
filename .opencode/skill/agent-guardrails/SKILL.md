@@ -21,9 +21,11 @@ glob negation like `MCP-xyz*:*place*`. (Two levels of globs are supported.)
      "kite_modify_order": false,
      "kite_cancel_order": false,
      "kite_*gtt*": false,
-     "groww_*place*": false, "moomoo_*place*": false
+     "moomoo_*place*": false
    }
    ```
+   (Groww needs no deny rules — it has no MCP server; its data is the read-only
+   CAS import.)
 2. **Per-agent** (`portfolio-analyst`), enable ONLY the read-only allowlist via globs
    (e.g. `get_holdings*`, `get_positions*`, `get_quotes*`, `latest_snapshot`,
    `allocation_summary`, `holding_history`) and let everything else inherit the global
@@ -31,9 +33,8 @@ glob negation like `MCP-xyz*:*place*`. (Two levels of globs are supported.)
 3. Verify by asking the agent to place an order — it must be refused with no tool call.
 
 ## MCP wiring (M7)
-- 4 servers: `zerodha` (`mcp@https://mcp.kite.trade` stdio), `groww` (local
-  `uv run groww_mcp/server.py`), `moomoo` (hosted, OAuth), `portfolio_data`
-  (local, SQLite).
+- 3 servers: `zerodha` (`mcp@https://mcp.kite.trade` stdio), `moomoo` (hosted, OAuth),
+  `portfolio_data` (local, SQLite). Groww has NO MCP (CAS import instead — PLAN §2c).
 - Moomoo OAuth: `opencode mcp auth moomoo`. Zerodha manual daily login via
   `token-session` skill.
 

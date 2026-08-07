@@ -13,7 +13,8 @@ component — strictly read-only.
 1. `portfolio_data_mcp/` — FastMCP server exposing read-only tools over SQLite:
    `latest_snapshot`, `holding_history`, `allocation_summary`, etc. No write tools.
 2. opencode project config for the `portfolio-analyst` agent:
-   - Register the 4 MCP servers (Zerodha, Groww, Moomoo, portfolio_data).
+   - Register the 3 MCP servers (Zerodha, Moomoo, portfolio_data). Groww has NO MCP —
+     its holdings come from the read-only CAS import (PLAN §2c).
    - Guardrails via the **`tools` config** (NOT `permission`): globally disable
      destructive MCP tools (`kite_place_order`, `*_gtt*`, etc.), and enable only the
      read-only allowlist on the `portfolio-analyst` agent (glob patterns).
@@ -33,3 +34,12 @@ component — strictly read-only.
 ## Verification
 - Run the eval set; zero non-allowlisted tool executions; answers within turn budget.
 - `uv run ruff check .` and `uv run pytest` pass.
+
+## Reporting back (you are orchestrated)
+You were launched by the **orchestrator**. When finished, reply with exactly this shape so
+results can be aggregated across parallel workers:
+- **Files changed:** list of paths
+- **Built:** one line per deliverable
+- **Verified:** command(s) run + pass/fail + key numbers
+- **Blockers/decisions:** anything the orchestrator must resolve, or "none"
+Be concise and factual; do not restate the brief.

@@ -12,8 +12,11 @@ names from docs.
 
 1. **Identify the endpoint** (from PLAN.md or config):
    - Zerodha: `https://mcp.kite.trade/mcp` (hosted, streamable HTTP).
-   - Moomoo: `https://mcp.moomoo.com/mcp` (OAuth; 401 unauthenticated).
-   - Groww: local FastMCP over stdio (`uv run groww_mcp/server.py`).
+   - Moomoo: `https://mcp.moomoo.com/mcp` (OAuth; 401 unauthenticated) + our local
+     OpenD wrapper (`moomoo_mcp/server.py`, stdio).
+   - Groww: **no MCP exists** — the ₹499/mo Trade API is equities-only (no MF, PLAN
+     §2c) and was removed; its data comes from the free CAS import (`cas_import.py`,
+     MIT `casparser`) + AMFI NAV (`mf_nav.py`). Never build a Groww MCP wrapper.
 2. **Connect** with the Python `mcp` SDK:
    - Remote: `StreamableHttpSession` over `httpx` (with token header if needed).
    - Local: `stdio_client` running the FastMCP server command.
@@ -34,8 +37,7 @@ client will be constructed with ONLY these names. Examples:
 ```json
 {
   "zerodha": ["get_holdings", "get_positions", "get_quotes", "get_user_profile"],
-  "groww": ["get_holdings", "get_positions", "get_quotes"],
-  "moomoo": ["get_account_summary", "get_holdings", "get_quote"]
+  "moomoo": ["get_accounts", "get_positions", "get_funds"]
 }
 ```
 

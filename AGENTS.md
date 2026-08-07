@@ -45,7 +45,7 @@ the how and the why at every step. Follow this rhythm for each piece of work:
 | Platform | Geography | Integration | Auth |
 |---|---|---|---|
 | Zerodha | IN | hosted MCP `https://mcp.kite.trade/mcp` | MCP `login` tool, manual daily browser login |
-| Groww | IN | custom FastMCP → official REST Trade API (`growwapi` SDK) | `API_AUTH_TOKEN`, manual daily login (verify lifetime) |
+| Groww | IN | **free CAS import** — monthly Consolidated Account Statement parsed by MIT `casparser` (`portfolio cas import`) + AMFI NAV (`mf_nav.py`); the ₹499/mo Trade API is equities-only (no MF) and was REMOVED (PLAN §2c) | none (email/OTP statement + keyless AMFI feed) |
 | Moomoo | US | OpenD gateway + `moomoo-api` SDK wrapped in our read-only FastMCP (`moomoo_mcp/`); hosted MCP `https://mcp.moomoo.com/mcp` is market-data-only (OAuth grants just `quote:read` to dynamic clients) | OpenD desktop login (manual) + trade password in `data/tokens.json` |
 
 ## Non-negotiable guardrails (enforced in code, not just policy)
@@ -58,9 +58,10 @@ the how and the why at every step. Follow this rhythm for each piece of work:
 2. **Secrets.** Tokens live only in gitignored `data/tokens.json`. A logging
    **redaction filter** is mandatory. Snapshots/outputs contain holdings, never
    credentials. CI has a grep-guard that fails on accidental token patterns.
-3. **No automated login.** Zerodha/Groww daily browser login (2FA) is manual by design
+3. **No automated login.** Zerodha daily browser login (2FA) is manual by design
    (regulatory requirement). Do NOT build Selenium/TOTP auto-login. Detect expiry and
-   notify via Telegram instead of failing silently.
+   notify via Telegram instead of failing silently. (Groww needs no login — its data
+   comes from the emailed CAS + the keyless AMFI feed.)
 4. **Determinism boundary.** M0–M6 + M8 rendering are deterministic — identical output
    for identical input. The LLM touches ONLY the M7 Q&A agent and the dashboard chat.
 5. **Inspect before normalize.** Connect to an MCP server, `list_tools()`, and dump raw
@@ -68,9 +69,39 @@ the how and the why at every step. Follow this rhythm for each piece of work:
 
 ## Build order
 
-M0 scaffold → M1 Zerodha e2e → M2 Moomoo + consolidated → M3 Groww wrapper → M4
-scheduling/calendars → M5 returns/XIRR → M6 alerts → M7 Q&A agent → M8 dashboard → M9
-deploy. Snapshotting starts in M1 (time-series value compounds with age).
+M0 scaffold → M1 Zerodha e2e → M2 Moomoo + consolidated → M3 Groww via free CAS import
+→ M4 scheduling/calendars → M5 returns/XIRR → M6 alerts → M7 Q&A agent → M8 dashboard →
+M9 deploy. Snapshotting starts in M1 (time-series value compounds with age).
+
+## Agent topology — orchestrator + workers
+
+The default agent is the **orchestrator** (`.opencode/agent/orchestrator.md`), a
+conductor that decomposes a goal into milestone work items, delegates each to a
+specialist **worker subagent**, runs independent workers **in parallel**, and **loops**
+until the milestone's `✅ Done when:` bar is met before advancing. It verifies results
+itself rather than trusting a worker's self-report.
+
+| Agent | Mode | Owns |
+|---|---|---|
+| `orchestrator` | primary (default) | Plan, decompose, delegate, parallelize, verify, loop |
+| `pipeline-builder` | subagent | M0–M6 deterministic pipeline |
+| `mcp-integration` | subagent | MCP connect/inspect, `samples/` capture, FastMCP wrappers |
+| `normalizer` | subagent | raw sample → common schema, FX/consolidation helpers |
+| `agent-runtime` | subagent | M7 Q&A agent layer |
+| `dashboard-builder` | subagent | M8 dashboard |
+| `deployer` | subagent | M9 deployment |
+| `code-reviewer` | all | independent review of plans/code/diffs — structure, logic, security, guardrail compliance, AI-slop cleanup; verdict at milestone gates |
+
+Rules of the topology:
+- **Parallelize within a milestone, never across milestones.** Build order stays a hard
+  gate; the orchestrator advances sequentially and parallelizes independent items inside
+  the current milestone.
+- **Inspect before normalize** still holds: `mcp-integration` captures a platform's raw
+  sample before its `normalizer` runs — never in parallel for the same platform.
+- `subagent_depth` is 2, so `pipeline-builder` may itself delegate to
+  `normalizer`/`mcp-integration`.
+- The orchestration playbook lives in the `orchestration` skill; load it before delegating.
+- Guardrails below apply to every agent at every level; no delegation loosens them.
 
 ## Verification
 

@@ -11,6 +11,7 @@ sectors map if provided, else null.
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Mapping
 from typing import Any
@@ -18,6 +19,12 @@ from typing import Any
 from portfolio.normalize.schema import Holding, required_float, to_float
 
 logger = logging.getLogger("portfolio.normalize.zerodha")
+
+
+def _pnl_pct(pnl: float | None, cost_basis: float | None) -> float | None:
+    if pnl is None or not cost_basis:
+        return None
+    return pnl / cost_basis * 100.0
 
 
 def normalize_holdings(
@@ -28,7 +35,12 @@ def normalize_holdings(
     currency: str = "INR",
     sectors: Mapping[str, tuple[str | None, str | None]] | None = None,
 ) -> list[Holding]:
-    """Map a Kite holdings payload (list of dicts) to the common schema."""
+    """Map a Kite holdings payload (list of dicts) to the common schema.
+
+    Full-fidelity (M2.5): day P&L / prev close / total P&L / isin / exchange are
+    stored alongside the core fields, and the raw Kite row is kept in raw_json
+    so no broker detail is ever lost.
+    """
     sectors = sectors or {}
     out: list[Holding] = []
     for item in raw:
@@ -47,6 +59,7 @@ def normalize_holdings(
         current_value = current_price * quantity
 
         sector, asset_class = sectors.get(ticker, (None, None))
+        pnl = to_float(item.get("pnl"))
 
         out.append(
             Holding(
@@ -62,6 +75,15 @@ def normalize_holdings(
                 currency=currency,
                 sector=sector,
                 asset_class=asset_class,
+                isin=item.get("isin") or None,
+                exchange=item.get("exchange") or None,
+                prev_close=to_float(item.get("close_price")),
+                day_change_ccy=to_float(item.get("day_change")),
+                day_change_pct=to_float(item.get("day_change_percentage")),
+                pnl_ccy=pnl,
+                pnl_pct=_pnl_pct(pnl, cost_basis),
+                position_side="LONG",
+                raw_json=json.dumps(item, default=str),
             )
         )
     logger.debug("normalized %d zerodha holdings", len(out))

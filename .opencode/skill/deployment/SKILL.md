@@ -31,8 +31,8 @@ description: M9 deployment — Supabase migration of the SQLite schema, GitHub A
 - CI grep-guard fails if a token pattern appears in tracked files.
 
 ## 5. Staleness monitor
-- Cron checks latest `snapshots.run_at`; if older than N days (config, e.g. 5), send
-  Telegram alert. For Zerodha/Groww an expired session additionally triggers a
+- Cron checks latest snapshot run; if older than N days (config, e.g. 5), send
+  Telegram alert. For Zerodha an expired session additionally triggers a
   "daily login needed" reminder via the `token-session` flow.
 
 ## Verification

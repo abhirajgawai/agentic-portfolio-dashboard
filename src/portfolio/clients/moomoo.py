@@ -30,6 +30,7 @@ ALLOWLIST = frozenset(
         "get_accounts",  # acc_id source for the other calls
         "get_positions",  # holdings with cost/price/P&L -> normalizer input
         "get_funds",  # total assets / market value / cash (USD)
+        "get_fills",  # today's executed trades -> daily ledger (XIRR)
     }
 )
 

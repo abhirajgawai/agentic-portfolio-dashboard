@@ -50,6 +50,7 @@ class Settings:
 PLATFORMS: dict[str, dict[str, str]] = {
     "zerodha": {"geography": "IN", "currency": "INR", "display_currency": "INR"},
     "groww": {"geography": "IN", "currency": "INR", "display_currency": "INR"},
+    "sharekhan": {"geography": "IN", "currency": "INR", "display_currency": "INR"},
     "moomoo": {"geography": "US", "currency": "USD", "display_currency": "SGD"},
 }
 

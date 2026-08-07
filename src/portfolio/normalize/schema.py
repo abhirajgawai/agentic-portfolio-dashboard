@@ -41,6 +41,22 @@ class Holding:
     sector: str | None
     asset_class: str | None
 
+    # ---- enrichment (curated or broker-provided) ----
+    isin: str | None = None
+    exchange: str | None = None
+
+    # ---- full-fidelity holding detail (M2.5) ----
+    prev_close: float | None = None
+    day_change_ccy: float | None = None
+    day_change_pct: float | None = None
+    pnl_ccy: float | None = None
+    pnl_pct: float | None = None
+    realized_pnl_ccy: float | None = None
+    unrealized_pnl_ccy: float | None = None
+    can_sell_qty: float | None = None
+    position_side: str | None = None
+    raw_json: str | None = None
+
     def as_record(self) -> dict[str, Any]:
         return asdict(self)
 

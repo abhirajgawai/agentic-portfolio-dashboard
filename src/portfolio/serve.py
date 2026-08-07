@@ -73,6 +73,12 @@ async def health(request: Request) -> JSONResponse:
 
 
 async def rpc(request: Request) -> JSONResponse:
+    # Trust model (MINOR-8): /rpc is unauthenticated BY DESIGN on a personal
+    # box. It binds 127.0.0.1 only, and the ONLY tools it can reach are the
+    # client's read-only allowlist (guardrail #1) - there is nothing an attacker
+    # who can already run code on this machine could do here that they could not
+    # do directly, and the daemon never exposes credentials. No order tools,
+    # no write path, ever.
     client = state.client
     if client is None or not state.connected:
         return JSONResponse(

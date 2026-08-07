@@ -21,25 +21,29 @@ def _tables(conn) -> set[str]:
     return {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
 
 
-def test_fresh_migrate_creates_v3_schema(tmp_path) -> None:
+def test_fresh_migrate_creates_v5_schema(tmp_path) -> None:
     path = tmp_path / "t.db"
-    assert migrate(path) == 3
+    assert migrate(path) == 5
     conn = connect(path)
     assert {
         "account", "instrument", "fx_rate", "price_history",
-        "position", "position_snapshot", "portfolio_value", "trade", "runs",
+        "position", "position_snapshot", "portfolio_value", "trade", "runs", "account_funds",
     } <= _tables(conn)
     assert {"snapshots", "fx_rates", "trades"} & _tables(conn) == set()
-    # v3 adds cost basis in base currency (drives return% on the dashboard).
+    # v3 adds cost basis in base currency; v4 adds full-fidelity holding detail;
+    # v5 (NIT-1) drops the never-populated instrument.instrument_type column.
     pos_cols = {r["name"] for r in conn.execute("PRAGMA table_info(position)").fetchall()}
-    assert "cost_value_base" in pos_cols
+    assert {"cost_value_base", "raw_json", "day_change_ccy", "pnl_ccy"} <= pos_cols
+    inst_cols = {r["name"] for r in conn.execute("PRAGMA table_info(instrument)").fetchall()}
+    assert "instrument_type" not in inst_cols
+    assert "asset_class" in inst_cols
     conn.close()
 
 
 def test_migrate_is_idempotent(tmp_path) -> None:
     path = tmp_path / "t.db"
-    assert migrate(path) == 3
-    assert migrate(path) == 3
+    assert migrate(path) == 5
+    assert migrate(path) == 5
 
 
 def test_v1_to_v2_backfills_data(tmp_path) -> None:
@@ -56,7 +60,7 @@ def test_v1_to_v2_backfills_data(tmp_path) -> None:
     raw.commit()
     raw.close()
 
-    assert migrate(path) == 3
+    assert migrate(path) == 5
 
     conn = connect(path)
     assert conn.execute("SELECT COUNT(*) FROM position").fetchone()[0] == 1

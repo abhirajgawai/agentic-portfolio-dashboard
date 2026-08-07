@@ -36,7 +36,11 @@ def _fake_fx(monkeypatch):
     def rates(base, quotes, **kw):
         return {q: USD_INR for q in quotes if q != base}
 
-    monkeypatch.setattr(snap, "get_fx_rate", rate)
+    # get_fx_rate is now consumed inside the shared write layer (db/persist);
+    # snapshot keeps only get_fx_rates (the --all allocation fetch).
+    import portfolio.db.persist as persist_mod
+
+    monkeypatch.setattr(persist_mod, "get_fx_rate", rate)
     monkeypatch.setattr(snap, "get_fx_rates", rates)
 
 
@@ -143,14 +147,16 @@ def test_all_non_eod_keeps_consolidated_position_rows(db, monkeypatch):
     assert conn.execute("SELECT COUNT(*) FROM position").fetchone()[0] == 5
     assert conn.execute("SELECT COUNT(*) FROM position_snapshot").fetchone()[0] == 0
     assert conn.execute("SELECT COUNT(*) FROM portfolio_value").fetchone()[0] == 0
-    # runs: one per leg
+    # runs: one per leg (zerodha ok, moomoo ok)
     assert conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0] == 2
     assert "total=" in result
     conn.close()
 
 
-def test_all_eod_writes_one_consolidated_value_set(db, monkeypatch):
-    """Regression: the 'all' scope must be written ONCE with BOTH platforms."""
+def test_all_eod_writes_no_portfolio_value_rows(db, monkeypatch):
+    """F1: the portfolio_value write path is removed - an EOD `--all` run writes
+    the state + daily ledger only; the value series is derived from
+    position_snapshot at export time (portfolio.series), never stored."""
     monkeypatch.setattr(snap, "_fetch", lambda port, tool, args: _zerodha_rpc())
     monkeypatch.setattr(snap, "_collect_moomoo", _moomoo_collect())
     snap.run_snapshot("all", is_eod=True, db_path=db)
@@ -158,17 +164,32 @@ def test_all_eod_writes_one_consolidated_value_set(db, monkeypatch):
     from portfolio.db import connect
 
     conn = connect(db)
-    # scopes: all + geography(IN,US) + platform(zerodha,moomoo) = 5 rows
-    rows = conn.execute("SELECT scope_type, scope_key, value_base FROM portfolio_value ORDER BY scope_type, scope_key").fetchall()
-    assert len(rows) == 5
-    by_scope = {(r["scope_type"], r["scope_key"]): r["value_base"] for r in rows}
-    zerodha_total = 16100.0 + 3400.0 + 19000.0
-    moomoo_total = (1550.0 + 600.0) * USD_INR
-    assert by_scope[("all", "")] == pytest.approx(zerodha_total + moomoo_total)
-    assert by_scope[("platform", "zerodha")] == pytest.approx(zerodha_total)
-    assert by_scope[("platform", "moomoo")] == pytest.approx(moomoo_total)
-    assert by_scope[("geography", "IN")] == pytest.approx(zerodha_total)
-    assert by_scope[("geography", "US")] == pytest.approx(moomoo_total)
+    # daily ledger written for both legs (3 zerodha + 2 moomoo)
+    assert conn.execute("SELECT COUNT(*) FROM position_snapshot").fetchone()[0] == 5
+    assert conn.execute("SELECT COUNT(*) FROM price_history").fetchone()[0] == 5
+    # ...but NO portfolio_value rows (legacy table, unread)
+    assert conn.execute("SELECT COUNT(*) FROM portfolio_value").fetchone()[0] == 0
+    # runs: one per leg (zerodha ok, moomoo ok)
+    assert conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0] == 2
+    conn.close()
+
+
+def test_moomoo_collect_failure_writes_runs_error(db, monkeypatch):
+    """F3 symmetry: a moomoo collection failure (OpenD down / accounts call
+    error) raises SessionNotReady AND leaves an audited `runs` error row."""
+    async def _collect_fails():
+        raise snap.SessionNotReady("cannot reach OpenD on 127.0.0.1:11111")
+
+    monkeypatch.setattr(snap, "_collect_moomoo", _collect_fails)
+    with pytest.raises(snap.SessionNotReady, match="OpenD"):
+        snap.run_snapshot("moomoo", db_path=db)
+
+    from portfolio.db import connect
+
+    conn = connect(db)
+    run = conn.execute("SELECT status, error FROM runs").fetchone()
+    assert run is not None and run["status"] == "error"
+    assert "OpenD" in (run["error"] or "")
     conn.close()
 
 
@@ -184,3 +205,35 @@ def test_all_allocation_sums_to_100(db, monkeypatch):
         shares_text = section.split(": ", 1)[1]
         shares = [float(x.split("=")[1].rstrip("%")) for x in shares_text.split(", ")]
         assert sum(shares) == pytest.approx(100.0, abs=0.6)
+
+
+def test_all_continues_when_one_leg_fails(db, monkeypatch):
+    """M-2 regression: a malformed zerodha row must NOT kill the moomoo leg.
+
+    The failed leg leaves an audited `runs` error row; --all completes the
+    remaining legs and reports the failure in the summary line.
+    """
+    bad = json.loads(FIXTURE.read_text(encoding="utf-8"))
+    bad[0]["last_price"] = "boom"
+    monkeypatch.setattr(
+        snap, "_fetch",
+        lambda port, tool, args: {"tool": "get_holdings", "texts": [], "parse": bad, "login_required": False},
+    )
+    monkeypatch.setattr(snap, "_collect_moomoo", _moomoo_collect())
+
+    result = snap.run_snapshot("all", db_path=db)
+
+    from portfolio.db import connect
+
+    conn = connect(db)
+    # moomoo's 2 positions persisted despite the zerodha failure
+    assert conn.execute("SELECT COUNT(*) FROM position").fetchone()[0] == 2
+    runs = {
+        r["platform"]: r["status"]
+        for r in conn.execute("SELECT platform, status FROM runs ORDER BY platform").fetchall()
+    }
+    assert runs == {"zerodha": "error", "moomoo": "ok"}
+    conn.close()
+    assert "FAILED: zerodha" in result
+    assert "moomoo: ok: 2 holdings" in result
+    assert "total=" in result

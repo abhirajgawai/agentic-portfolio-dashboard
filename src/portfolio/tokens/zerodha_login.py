@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
+import sys
 import webbrowser
 from dataclasses import dataclass
 from datetime import UTC
@@ -20,6 +22,16 @@ from portfolio.config import Settings
 from portfolio.tokens.store import set_platform_value
 
 logger = logging.getLogger("portfolio.tokens.zerodha_login")
+
+# MINOR-1: the authorize URL carries the session_id - a login capability. The
+# user needs the FULL url on an interactive console, but the daemon's detached
+# stdout is a log file, so anything printed there is stripped of session_id.
+_SESSION_ID = re.compile(r"(session_id=)[^\s&\"']+")
+
+
+def _strip_session_id(text: str) -> str:
+    """Redact the session_id query param from a login URL / raw payload."""
+    return _SESSION_ID.sub(r"\1[REDACTED]", text)
 
 
 @dataclass
@@ -60,10 +72,15 @@ async def ensure_authenticated(
         return LoginOutcome(ok=False, detail="could not locate authorize URL in login payload")
 
     # Surface the server's AI-safety warning to the user (required by the tool).
-    print(raw)
+    # The raw payload embeds the authorize URL - print it WITHOUT the session_id
+    # so a detached daemon's log never persists a login capability (MINOR-1).
+    print(_strip_session_id(raw))
     if open_browser:
         webbrowser.open(url)
-    print(f"\nLogin link: {url}\nComplete login in your browser (2FA). Waiting up to {int(timeout_seconds)}s...")
+    # Console copy the user needs: keep the full URL on an interactive terminal,
+    # strip it when stdout is a file (scheduled daemon -> data/logs/).
+    printed_url = url if sys.stdout.isatty() else _strip_session_id(url)
+    print(f"\nLogin link: {printed_url}\nComplete login in your browser (2FA). Waiting up to {int(timeout_seconds)}s...")
 
     waited = 0.0
     while waited < timeout_seconds:

@@ -76,13 +76,10 @@ def test_eod_run_writes_daily_history(db, monkeypatch) -> None:
     assert conn.execute("SELECT COUNT(*) FROM position").fetchone()[0] == 3
     assert conn.execute("SELECT COUNT(*) FROM position_snapshot").fetchone()[0] == 3
     assert conn.execute("SELECT COUNT(*) FROM price_history").fetchone()[0] == 3
-    # scopes: all + geography(IN) + platform(zerodha)
-    rows = conn.execute("SELECT scope_type, scope_key, value_base FROM portfolio_value").fetchall()
-    assert len(rows) == 3
-    total = conn.execute(
-        "SELECT value_base FROM portfolio_value WHERE scope_type='all'"
-    ).fetchone()[0]
-    assert total == pytest.approx(16100.0 + 3400.0 + 19000.0)
+    # F1: the portfolio_value write path is removed - an EOD leg writes the
+    # daily ledger only; the value series is derived from position_snapshot at
+    # export time (portfolio.series), never stored incrementally.
+    assert conn.execute("SELECT COUNT(*) FROM portfolio_value").fetchone()[0] == 0
     conn.close()
 
 
@@ -95,7 +92,9 @@ def test_eod_rerun_same_day_updates_not_duplicates(db, monkeypatch) -> None:
 
     conn = connect(db)
     assert conn.execute("SELECT COUNT(*) FROM position_snapshot").fetchone()[0] == 3
-    assert conn.execute("SELECT COUNT(*) FROM portfolio_value").fetchone()[0] == 3
+    # F1: no portfolio_value rows at all (write path removed) - a same-day EOD
+    # re-run must not create any either.
+    assert conn.execute("SELECT COUNT(*) FROM portfolio_value").fetchone()[0] == 0
     conn.close()
 
 
@@ -119,12 +118,71 @@ def test_expired_session_warns_and_logs_error(db, monkeypatch) -> None:
 
 
 def test_daemon_down_raises_clear_error(db, monkeypatch) -> None:
+    """F3: RPC unreachable must leave an audited `runs` error row - a scheduled
+    run with the daemon down must be VISIBLE in the runs audit (M4 bar), not
+    vanish because the failure raised before any write_run."""
     def _down(port, tool, args):
         raise snap.SessionNotReady("cannot reach zerodha daemon on :8787 - start it with `portfolio serve`")
 
     monkeypatch.setattr(snap, "_fetch", _down)
     with pytest.raises(snap.SessionNotReady, match="serve"):
         snap.run_snapshot("zerodha", db_path=db)
+
+    from portfolio.db import connect
+
+    conn = connect(db)
+    run = conn.execute("SELECT status, error FROM runs").fetchone()
+    assert run is not None and run["status"] == "error"
+    assert "cannot reach zerodha daemon" in (run["error"] or "")
+    conn.close()
+
+
+def test_daemon_spawn_timeout_writes_runs_error(db, monkeypatch) -> None:
+    """F3: the daemon failing to come up (spawn + manual-login timeout) is the
+    other pre-write_run failure - it must also leave an audited runs error row."""
+    monkeypatch.delenv("PORTFOLIO_NO_DAEMON", raising=False)
+
+    def _never_up():
+        raise snap.SessionNotReady(
+            "zerodha daemon did not come up in time - check data/logs/zerodha_serve.log "
+            "(a manual browser 2FA login is required)."
+        )
+
+    monkeypatch.setattr(snap, "ensure_zerodha_daemon", _never_up)
+    with pytest.raises(snap.SessionNotReady, match="daemon did not come up"):
+        snap.run_snapshot("zerodha", db_path=db)
+
+    from portfolio.db import connect
+
+    conn = connect(db)
+    run = conn.execute("SELECT status, error FROM runs").fetchone()
+    assert run is not None and run["status"] == "error"
+    assert "daemon did not come up" in (run["error"] or "")
+    assert conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0] == 1  # no double-write
+    conn.close()
+
+
+def test_malformed_holdings_row_writes_error_run_and_raises(db, monkeypatch) -> None:
+    """M-2 regression: broker payload shape drift (a bad float) must leave an
+    audited `runs` error row and surface as SessionNotReady - never a raw
+    traceback that would kill `--all`'s remaining legs."""
+    payload = json.loads(FIXTURE.read_text(encoding="utf-8"))
+    payload[0]["quantity"] = "not-a-number"
+    monkeypatch.setattr(
+        snap, "_fetch",
+        lambda port, tool, args: {"tool": "get_holdings", "texts": [], "parse": payload, "login_required": False},
+    )
+    with pytest.raises(snap.SessionNotReady, match="zerodha snapshot failed"):
+        snap.run_snapshot("zerodha", db_path=db)
+
+    from portfolio.db import connect
+
+    conn = connect(db)
+    run = conn.execute("SELECT status, error FROM runs").fetchone()
+    assert run is not None and run["status"] == "error"
+    assert "missing/not numeric" in (run["error"] or "")
+    assert conn.execute("SELECT COUNT(*) FROM position").fetchone()[0] == 0
+    conn.close()
 
 
 # ---- daemon auto-launch (M2: `snapshot --all` starts serve for you) ----------

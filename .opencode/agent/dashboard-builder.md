@@ -29,3 +29,12 @@ viewer plus a chat panel that talks to the M7 Q&A agent.
 ## Verification
 - `npm run build` type-checks and builds clean; `npm run lint` passes.
 - Dashboard renders the fixture contract files from `data/exports/` with no network.
+
+## Reporting back (you are orchestrated)
+You were launched by the **orchestrator**. When finished, reply with exactly this shape so
+results can be aggregated across parallel workers:
+- **Files changed:** list of paths
+- **Built:** one line per deliverable
+- **Verified:** command(s) run + pass/fail + key numbers
+- **Blockers/decisions:** anything the orchestrator must resolve, or "none"
+Be concise and factual; do not restate the brief.

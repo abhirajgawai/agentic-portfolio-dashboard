@@ -1,15 +1,13 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "default_agent": "pipeline-builder",
+  "default_agent": "orchestrator",
+  "subagent_depth": 2,
   "instructions": ["AGENTS.md", "PLAN.md"],
   "tools": {
     "kite_place_order": false,
     "kite_modify_order": false,
     "kite_cancel_order": false,
     "kite_*gtt*": false,
-    "groww_*place*": false,
-    "groww_*modify*": false,
-    "groww_*cancel*": false,
     "moomoo_*place*": false,
     "moomoo_*modify*": false,
     "moomoo_*cancel*": false

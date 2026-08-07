@@ -5,10 +5,10 @@ Source: open.er-api.com (free, keyless, deterministic). One HTTP call to
 SGD performs exactly ONE fetch - that is the "one rate per run" rule.
 
 Why a process-wide cache? A snapshot run is a single process, and several call
-sites need the same rate (snapshot._persist for value_base, snapshot.
-_portfolio_values for totals). Without the cache each call would re-fetch and
-two calls seconds apart could return different rates, silently corrupting a
-run's internal consistency (value_base in the position row vs. the totals row).
+sites need the same rate (db.persist.persist for value_base, and the --all
+allocation). Without the cache each call would re-fetch and two calls seconds
+apart could return different rates, silently corrupting a run's internal
+consistency (value_base in the position row vs. the allocation row).
 Cache keyed by (base, quote) -> identical input, identical output.
 
 Contract: rate(base, quote) is the multiplier R such that

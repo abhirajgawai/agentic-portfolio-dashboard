@@ -1,0 +1,769 @@
+{
+  "accounts": [
+    {
+      "name": "SHAREKHAN LIMITED",
+      "type": "NSDL Demat Account",
+      "dp_id": "IN300513",
+      "client_id": "846XXXXX",
+      "folios": 6,
+      "balance": "38410.18",
+      "owners": [
+        {
+          "name": "ABH*** ***",
+          "PAN": "CJXXXXXX3F",
+          "pan": null
+        }
+      ],
+      "equities": [
+        {
+          "name": "BAJAJ FINANCE LIMITED",
+          "isin": "INE296A01032",
+          "num_shares": "10",
+          "price": "1004.75",
+          "value": "10047.50",
+          "symbol": "BAJFINANCE",
+          "exchange": "NSE"
+        },
+        {
+          "name": "HDFC BANK LIMITED",
+          "isin": "INE040A01034",
+          "num_shares": "6",
+          "price": "797.95",
+          "value": "4787.70",
+          "symbol": "HDFCBANK",
+          "exchange": "NSE"
+        },
+        {
+          "name": "ION EXCHANGE (INDIA) LIMITED",
+          "isin": "INE570A01022",
+          "num_shares": "30",
+          "price": "408.20",
+          "value": "12246.00",
+          "symbol": "IONEXCHANG",
+          "exchange": "NSE"
+        },
+        {
+          "name": "JIO FINANCIAL SERVICES LIMITED",
+          "isin": "INE758E01017",
+          "num_shares": "2",
+          "price": "236.44",
+          "value": "472.88",
+          "symbol": "JIOFIN",
+          "exchange": "NSE"
+        },
+        {
+          "name": "RELAXO FOOTWEARS LIMITED",
+          "isin": "INE131B01039",
+          "num_shares": "14",
+          "price": "405.75",
+          "value": "5680.50",
+          "symbol": "RELAXO",
+          "exchange": "NSE"
+        },
+        {
+          "name": "RELIANCE INDUSTRIES LIMITED",
+          "isin": "INE002A01018",
+          "num_shares": "4",
+          "price": "1293.90",
+          "value": "5175.60",
+          "symbol": "RELIANCE",
+          "exchange": "NSE"
+        }
+      ],
+      "mutual_funds": [],
+      "bonds": []
+    },
+    {
+      "name": "ZERODHA BROKING LIMITED",
+      "type": "CDSL Demat Account",
+      "dp_id": "12081600",
+      "client_id": "263XXXXX",
+      "folios": 35,
+      "balance": "1701793.08",
+      "owners": [
+        {
+          "name": "ABH*** ***",
+          "PAN": "CJXXXXXX3F",
+          "pan": null
+        }
+      ],
+      "equities": [
+        {
+          "name": "ADANI POWER LIMITED#NEW EQUITY SHARES WITH FACE VALUE RS.2/- AFTER SUB-DIVISION",
+          "isin": "INE814H01029",
+          "num_shares": "234.000",
+          "price": "223.70",
+          "value": "52345.80",
+          "symbol": "ADANIPOWER",
+          "exchange": "NSE"
+        },
+        {
+          "name": "AFFLE 3I LIMITED#NEW EQUITY SHARES WITH FACE VALUE RS. 2/- AFTER SUB DIVISION",
+          "isin": "INE00WC01027",
+          "num_shares": "15.000",
+          "price": "1412.80",
+          "value": "21192.00",
+          "symbol": "AFFLE",
+          "exchange": "NSE"
+        },
+        {
+          "name": "APAR INDUSTRIES LIMITED EQUITY SHARES",
+          "isin": "INE372A01015",
+          "num_shares": "21.000",
+          "price": "15691.70",
+          "value": "329525.70",
+          "symbol": "APARINDS",
+          "exchange": "NSE"
+        },
+        {
+          "name": "BAJAJ FINANCE LIMITED#NEW EQUITY SHARES WITH FACE VALUE RE.1/- AFTER SUB-DIVISION",
+          "isin": "INE296A01032",
+          "num_shares": "10.000",
+          "price": "1004.75",
+          "value": "10047.50",
+          "symbol": "BAJFINANCE",
+          "exchange": "NSE"
+        },
+        {
+          "name": "CAPLIN POINT LABORATORIES LIMITED # NEW EQ SH WITH FV RE 2/- AFTER SUB DIVISION",
+          "isin": "INE475E01026",
+          "num_shares": "87.000",
+          "price": "2624.15",
+          "value": "228301.05",
+          "symbol": "CAPLIPOINT",
+          "exchange": "NSE"
+        },
+        {
+          "name": "CENTRAL DEPOSITORY SERVICES (INDIA) LIMITED - EQUITY SHARES",
+          "isin": "INE736A01011",
+          "num_shares": "40.000",
+          "price": "1305.50",
+          "value": "52220.00",
+          "symbol": "CDSL",
+          "exchange": "NSE"
+        },
+        {
+          "name": "CG POWER AND INDUSTRIAL SOLUTIONS LIMITED - NEW EQUITY SHARES OF RE. 2/- AFTER SPLIT",
+          "isin": "INE067A01029",
+          "num_shares": "30.000",
+          "price": "952.25",
+          "value": "28567.50",
+          "symbol": "CGPOWER",
+          "exchange": "NSE"
+        },
+        {
+          "name": "CMS INFO SYSTEMS LIMITED # EQUITY SHARES",
+          "isin": "INE925R01014",
+          "num_shares": "100.000",
+          "price": "280.85",
+          "value": "28085.00",
+          "symbol": "CMSINFO",
+          "exchange": "NSE"
+        },
+        {
+          "name": "COMPUTER AGE MANAGEMENT SERVICES LIMITED#NEW EQUITY SHARES WITH FACE VALUE RS.2/- AFTER SUB-DIVISION",
+          "isin": "INE596I01020",
+          "num_shares": "100.000",
+          "price": "796.40",
+          "value": "79640.00",
+          "symbol": "CAMS",
+          "exchange": "NSE"
+        },
+        {
+          "name": "CUMMINS INDIA LIMITED - EQUITY SHARES - FV RS.2/-",
+          "isin": "INE298A01020",
+          "num_shares": "9.000",
+          "price": "5656.30",
+          "value": "50906.70",
+          "symbol": "CUMMINSIND",
+          "exchange": "NSE"
+        },
+        {
+          "name": "DEEPAK NITRITE LTD#FULLY PAID UP EQ SH WITH F.V. OF RS.2/- AFTER SUB-DIVISION",
+          "isin": "INE288B01029",
+          "num_shares": "0.000",
+          "price": "1547.05",
+          "value": "10829.35",
+          "symbol": "DEEPAKNTR",
+          "exchange": "NSE"
+        },
+        {
+          "name": "E I D PARRY (INDIA) LIMITED-NEW EQUITY SHARES OF RE.1/- AFTER SUB-DIVISION",
+          "isin": "INE126A01031",
+          "num_shares": "40.000",
+          "price": "713.25",
+          "value": "28530.00",
+          "symbol": "EIDPARRY",
+          "exchange": "NSE"
+        },
+        {
+          "name": "ETERNAL LIMITED # EQUITY SHARES",
+          "isin": "INE758T01015",
+          "num_shares": "20.000",
+          "price": "264.65",
+          "value": "5293.00",
+          "symbol": "ETERNAL",
+          "exchange": "NSE"
+        },
+        {
+          "name": "GODAWARI POWER AND ISPAT LIMITED#NEW EQUITY SHARES WITH FACE VALUE RE.1/- AFTER SUB-DIVISION",
+          "isin": "INE177H01039",
+          "num_shares": "450.000",
+          "price": "255.65",
+          "value": "115042.50",
+          "symbol": "GPIL",
+          "exchange": "NSE"
+        },
+        {
+          "name": "HCL TECHNOLOGIES LIMITED - EQUITY SHARES - FV RS.2/-",
+          "isin": "INE860A01027",
+          "num_shares": "10.000",
+          "price": "1072.00",
+          "value": "10720.00",
+          "symbol": "HCLTECH",
+          "exchange": "NSE"
+        },
+        {
+          "name": "HDFC BANK LIMITED#NEW EQUITY SHARES WITH FACE VALUE RE. 1/- AFTER SUBDIVISION",
+          "isin": "INE040A01034",
+          "num_shares": "60.000",
+          "price": "798.40",
+          "value": "47904.00",
+          "symbol": "HDFCBANK",
+          "exchange": "NSE"
+        },
+        {
+          "name": "INDIAN RAILWAY CATERING AND TOURISM CORPORATION LTD#NEW EQUITY SHARES WITH FV RS.2/-AFT SUB DIVISION",
+          "isin": "INE335Y01020",
+          "num_shares": "21.000",
+          "price": "503.10",
+          "value": "10565.10",
+          "symbol": "IRCTC",
+          "exchange": "NSE"
+        },
+        {
+          "name": "INDIAN RAILWAY FINANCE CORPORATION LIMITED # EQUITY SHARES",
+          "isin": "INE053F01010",
+          "num_shares": "170.000",
+          "price": "90.51",
+          "value": "15386.70",
+          "symbol": "IRFC",
+          "exchange": "NSE"
+        },
+        {
+          "name": "INDIAN RENEWABLE ENERGY DEVELOPMENT AGENCY LIMITED # EQUITY SHARES",
+          "isin": "INE202E01016",
+          "num_shares": "100.000",
+          "price": "128.65",
+          "value": "12865.00",
+          "symbol": "IREDA",
+          "exchange": "NSE"
+        },
+        {
+          "name": "INFOSYS LIMITED - EQUITY SHARES OF RS 5/- EACH",
+          "isin": "INE009A01021",
+          "num_shares": "5.000",
+          "price": "1000.60",
+          "value": "5003.00",
+          "symbol": "INFY",
+          "exchange": "NSE"
+        },
+        {
+          "name": "INOX INDIA LIMITED # EQUITY SHARES",
+          "isin": "INE616N01034",
+          "num_shares": "40.000",
+          "price": "1960.75",
+          "value": "78430.00",
+          "symbol": "INOXINDIA",
+          "exchange": "NSE"
+        },
+        {
+          "name": "ION EXCHANGE (INDIA) LIMITED#NEW EQUITY SHARES WITH FACE VALUE RE.1/- AFTER SUB-DIVISION",
+          "isin": "INE570A01022",
+          "num_shares": "31.000",
+          "price": "408.40",
+          "value": "12660.40",
+          "symbol": "IONEXCHANG",
+          "exchange": "NSE"
+        },
+        {
+          "name": "JIO FINANCIAL SERVICES LIMITED # EQUITY SHARES",
+          "isin": "INE758E01017",
+          "num_shares": "166.000",
+          "price": "236.50",
+          "value": "39259.00",
+          "symbol": "JIOFIN",
+          "exchange": "NSE"
+        },
+        {
+          "name": "KPIT TECHNOLOGIES LIMITED # EQUITY SHARES",
+          "isin": "INE04I401011",
+          "num_shares": "20.000",
+          "price": "671.45",
+          "value": "13429.00",
+          "symbol": "KPITTECH",
+          "exchange": "NSE"
+        },
+        {
+          "name": "LARSEN & TOUBRO LIMITED\u0002 EQUITY SHARES OF RS.2/- EACH",
+          "isin": "INE018A01030",
+          "num_shares": "3.000",
+          "price": "4143.95",
+          "value": "12431.85",
+          "symbol": "LT",
+          "exchange": "NSE"
+        },
+        {
+          "name": "POWER FINANCE CORPORATION LIMITED - EQUITY SHARES",
+          "isin": "INE134E01011",
+          "num_shares": "200.000",
+          "price": "424.45",
+          "value": "84890.00",
+          "symbol": "PFC",
+          "exchange": "NSE"
+        },
+        {
+          "name": "PRICOL LIMITED # EQUITY SHARES",
+          "isin": "INE726V01018",
+          "num_shares": "55.000",
+          "price": "603.00",
+          "value": "33165.00",
+          "symbol": "PRICOLLTD",
+          "exchange": "NSE"
+        },
+        {
+          "name": "RAIL VIKAS NIGAM LIMITED # EQUITY SHARES",
+          "isin": "INE415G01027",
+          "num_shares": "65.000",
+          "price": "235.95",
+          "value": "15336.75",
+          "symbol": "RVNL",
+          "exchange": "NSE"
+        },
+        {
+          "name": "SONA BLW PRECISION FORGINGS LIMITED # EQUITY SHARES",
+          "isin": "INE073K01018",
+          "num_shares": "60.000",
+          "price": "619.70",
+          "value": "37182.00",
+          "symbol": "SONACOMS",
+          "exchange": "NSE"
+        },
+        {
+          "name": "SUPREME PETROCHEM LIMITED#NEW EQUITY SHARES WITH FACE VALUE RS.2/- AFTER SUB-DIVISION",
+          "isin": "INE663A01033",
+          "num_shares": "20.000",
+          "price": "714.65",
+          "value": "14293.00",
+          "symbol": "SPLPETRO",
+          "exchange": "NSE"
+        },
+        {
+          "name": "THE SUPREME INDUSTRIES LIMITED-NEW EQUITY SHARES OF RS. 2/- AFTER SUB-DIVISION",
+          "isin": "INE195A01028",
+          "num_shares": "10.000",
+          "price": "3157.65",
+          "value": "31576.50",
+          "symbol": "SUPREMEIND",
+          "exchange": "NSE"
+        },
+        {
+          "name": "VA TECH WABAG LIMITED - NEW EQUITY SHARES OF RS.2/- AFTER SUB-DIVISION",
+          "isin": "INE956G01038",
+          "num_shares": "40.000",
+          "price": "2010.75",
+          "value": "80430.00",
+          "symbol": "WABAG",
+          "exchange": "NSE"
+        },
+        {
+          "name": "WAAREE ENERGIES LIMITED # EQUITY SHARES",
+          "isin": "INE377N01017",
+          "num_shares": "25.000",
+          "price": "2946.50",
+          "value": "73662.50",
+          "symbol": "WAAREEENER",
+          "exchange": "NSE"
+        },
+        {
+          "name": "ZEN TECHNOLOGIES LIMITED # NEW EQ SH WITH FV RS.1/- AFTER SUB\u0002 DIVISION",
+          "isin": "INE251B01027",
+          "num_shares": "10.000",
+          "price": "1774.55",
+          "value": "17745.50",
+          "symbol": "ZENTEC",
+          "exchange": "NSE"
+        }
+      ],
+      "mutual_funds": [
+        {
+          "name": "MOTILAL OSWAL MUTUAL FUND",
+          "isin": "INF247L01AP3",
+          "amfi": null,
+          "type": null,
+          "balance": "44.000",
+          "nav": "325.72",
+          "value": "14331.68",
+          "avg_cost": null,
+          "total_cost": null,
+          "ucc": null,
+          "folio": null,
+          "pnl": null,
+          "return_": null
+        }
+      ],
+      "bonds": []
+    },
+    {
+      "name": "GROWW INVEST TECH PRIVATE LIMITED",
+      "type": "CDSL Demat Account",
+      "dp_id": "12088700",
+      "client_id": "163XXXXX",
+      "folios": 13,
+      "balance": "829607.81",
+      "owners": [
+        {
+          "name": "ABH*** ***",
+          "PAN": "CJXXXXXX3F",
+          "pan": null
+        }
+      ],
+      "equities": [],
+      "mutual_funds": [
+        {
+          "name": "AXIS MUTUAL FUND",
+          "isin": "INF846K01K35",
+          "amfi": "125354",
+          "type": "EQUITY",
+          "balance": "219.874",
+          "nav": "129.71",
+          "value": "28519.86",
+          "avg_cost": null,
+          "total_cost": null,
+          "ucc": null,
+          "folio": null,
+          "pnl": null,
+          "return_": null
+        },
+        {
+          "name": "EDELWEISS MUTUAL FUND",
+          "isin": "INF754K01QD2",
+          "amfi": "150902",
+          "type": "EQUITY",
+          "balance": "1477.818",
+          "nav": "18.63",
+          "value": "27533.23",
+          "avg_cost": null,
+          "total_cost": null,
+          "ucc": null,
+          "folio": null,
+          "pnl": null,
+          "return_": null
+        },
+        {
+          "name": "GROWW MUTUAL FUND",
+          "isin": "INF666M01OE7",
+          "amfi": null,
+          "type": null,
+          "balance": "1337.000",
+          "nav": "13.71",
+          "value": "18330.27",
+          "avg_cost": null,
+          "total_cost": null,
+          "ucc": null,
+          "folio": null,
+          "pnl": null,
+          "return_": null
+        },
+        {
+          "name": "HDFC MUTUAL FUND",
+          "isin": "INF179K01XQ0",
+          "amfi": "118989",
+          "type": "EQUITY",
+          "balance": "920.241",
+          "nav": "225.32",
+          "value": "207345.94",
+          "avg_cost": null,
+          "total_cost": null,
+          "ucc": null,
+          "folio": null,
+          "pnl": null,
+          "return_": null
+        },
+        {
+          "name": "HDFC MUTUAL FUND",
+          "isin": "INF179K01WN9",
+          "amfi": "119065",
+          "type": "EQUITY",
+          "balance": "34.139",
+          "nav": "732.71",
+          "value": "25013.85",
+          "avg_cost": null,
+          "total_cost": null,
+          "ucc": null,
+          "folio": null,
+          "pnl": null,
+          "return_": null
+        },
+        {
+          "name": "HDFC MUTUAL FUND",
+          "isin": "INF179K01WA6",
+          "amfi": "118968",
+          "type": "EQUITY",
+          "balance": "255.077",
+          "nav": "564.32",
+          "value": "143945.31",
+          "avg_cost": null,
+          "total_cost": null,
+          "ucc": null,
+          "folio": null,
+          "pnl": null,
+          "return_": null
+        },
+        {
+          "name": "ICICI PRUDENTIAL MUTUAL FUND",
+          "isin": "INF109KC1Y56",
+          "amfi": "149464",
+          "type": "DEBT",
+          "balance": "78.000",
+          "nav": "222.34",
+          "value": "17342.52",
+          "avg_cost": null,
+          "total_cost": null,
+          "ucc": null,
+          "folio": null,
+          "pnl": null,
+          "return_": null
+        },
+        {
+          "name": "MIRAE ASSET MUTUAL FUND",
+          "isin": "INF769K01LG4",
+          "amfi": "152459",
+          "type": "EQUITY",
+          "balance": "2640.793",
+          "nav": "10.25",
+          "value": "27078.69",
+          "avg_cost": null,
+          "total_cost": null,
+          "ucc": null,
+          "folio": null,
+          "pnl": null,
+          "return_": null
+        },
+        {
+          "name": "NIPPON INDIA MUTUAL FUND",
+          "isin": "INF204KB17I5",
+          "amfi": null,
+          "type": null,
+          "balance": "199.000",
+          "nav": "116.00",
+          "value": "23084.00",
+          "avg_cost": null,
+          "total_cost": null,
+          "ucc": null,
+          "folio": null,
+          "pnl": null,
+          "return_": null
+        },
+        {
+          "name": "NIPPON INDIA MUTUAL FUND",
+          "isin": "INF204K01K15",
+          "amfi": "118778",
+          "type": "EQUITY",
+          "balance": "32.564",
+          "nav": "202.50",
+          "value": "6594.18",
+          "avg_cost": null,
+          "total_cost": null,
+          "ucc": null,
+          "folio": null,
+          "pnl": null,
+          "return_": null
+        },
+        {
+          "name": "PPFAS MUTUAL FUND",
+          "isin": "INF879O01027",
+          "amfi": "122639",
+          "type": "EQUITY",
+          "balance": "810.546",
+          "nav": "90.04",
+          "value": "72983.99",
+          "avg_cost": null,
+          "total_cost": null,
+          "ucc": null,
+          "folio": null,
+          "pnl": null,
+          "return_": null
+        },
+        {
+          "name": "UTI MUTUAL FUND",
+          "isin": "INF789F1AUT5",
+          "amfi": "148703",
+          "type": "EQUITY",
+          "balance": "8561.989",
+          "nav": "21.43",
+          "value": "183466.30",
+          "avg_cost": null,
+          "total_cost": null,
+          "ucc": null,
+          "folio": null,
+          "pnl": null,
+          "return_": null
+        },
+        {
+          "name": "UTI MUTUAL FUND",
+          "isin": "INF789F1AYN0",
+          "amfi": "151739",
+          "type": "EQUITY",
+          "balance": "2163.030",
+          "nav": "22.36",
+          "value": "48369.68",
+          "avg_cost": null,
+          "total_cost": null,
+          "ucc": null,
+          "folio": null,
+          "pnl": null,
+          "return_": null
+        }
+      ],
+      "bonds": []
+    },
+    {
+      "name": "Mutual Fund Folios",
+      "type": "Mutual Fund Folios",
+      "dp_id": "",
+      "client_id": "",
+      "folios": 6,
+      "balance": "1893735.88",
+      "owners": [
+        {
+          "name": "ABH*** ***",
+          "PAN": "CJXXXXXX3F",
+          "pan": null
+        }
+      ],
+      "equities": [],
+      "mutual_funds": [
+        {
+          "name": "Axis Small Cap Fund Direct Growth",
+          "isin": "INF846K01K35",
+          "amfi": "125354",
+          "type": "EQUITY",
+          "balance": "1914.344",
+          "nav": "131.0700",
+          "value": "250913.07",
+          "avg_cost": "98.5716",
+          "total_cost": "188700.00",
+          "ucc": "MFAXXXXXXX",
+          "folio": "910XXXXXXXXX",
+          "pnl": "62213.07",
+          "return_": null
+        },
+        {
+          "name": "Edelweiss Nifty Midcap150 Momentum 50 Index Fund - Direct Plan Growth",
+          "isin": "INF754K01QD2",
+          "amfi": "150902",
+          "type": "EQUITY",
+          "balance": "3317.672",
+          "nav": "18.6200",
+          "value": "61775.05",
+          "avg_cost": "18.5672",
+          "total_cost": "61600.00",
+          "ucc": "NOTXXXXXXXXXX",
+          "folio": "910XXXXXXXX",
+          "pnl": "175.05",
+          "return_": null
+        },
+        {
+          "name": "HDFC BSE Sensex Index Fund - Direct Plan - Growth Option",
+          "isin": "INF179K01WN9",
+          "amfi": "119065",
+          "type": "EQUITY",
+          "balance": "548.985",
+          "nav": "730.4568",
+          "value": "401009.83",
+          "avg_cost": "648.1051",
+          "total_cost": "355800.00",
+          "ucc": "MFHXXXXXXX",
+          "folio": "173XXXXX",
+          "pnl": "45209.83",
+          "return_": null
+        },
+        {
+          "name": "HDFC Balanced Advantage Fund - Direct Plan - Growth Option",
+          "isin": "INF179K01WA6",
+          "amfi": "118968",
+          "type": "EQUITY",
+          "balance": "553.884",
+          "nav": "564.4870",
+          "value": "312660.32",
+          "avg_cost": "541.6297",
+          "total_cost": "300000.00",
+          "ucc": "MFHXXXXXXX",
+          "folio": "173XXXXX",
+          "pnl": "12660.32",
+          "return_": null
+        },
+        {
+          "name": "Mirae Asset Nifty Smallcap 250 Momentum Quality 100 ETF Fund of Fund Direct Plan",
+          "isin": "INF769K01LG4",
+          "amfi": "152459",
+          "type": "EQUITY",
+          "balance": "1886.693",
+          "nav": "10.2870",
+          "value": "19408.41",
+          "avg_cost": "9.5405",
+          "total_cost": "18000.00",
+          "ucc": "NOTXXXXXXXXXX",
+          "folio": "777XXXXXXXX",
+          "pnl": "1408.41",
+          "return_": null
+        },
+        {
+          "name": "NIPPON INDIA SMALL CAP FUND - DIRECT GROWTH PLAN GROWTH OPTION",
+          "isin": "INF204K01K15",
+          "amfi": "118778",
+          "type": "EQUITY",
+          "balance": "1661.728",
+          "nav": "204.1415",
+          "value": "339227.65",
+          "avg_cost": "172.9585",
+          "total_cost": "287410.00",
+          "ucc": "MFRXXXXXXX",
+          "folio": "477XXXXXXXXX",
+          "pnl": "51817.65",
+          "return_": null
+        },
+        {
+          "name": "Parag Parikh Flexi Cap Fund - Direct Plan Growth",
+          "isin": "INF879O01027",
+          "amfi": "122639",
+          "type": "EQUITY",
+          "balance": "5662.814",
+          "nav": "89.8390",
+          "value": "508741.55",
+          "avg_cost": "69.1176",
+          "total_cost": "391400.00",
+          "ucc": "MFPXXXXXXX",
+          "folio": "109XXXXX",
+          "pnl": "117341.55",
+          "return_": null
+        }
+      ],
+      "bonds": []
+    }
+  ],
+  "statement_period": {
+    "from_": "01-Jun-2026",
+    "to": "30-Jun-2026"
+  },
+  "investor_info": {
+    "name": "ABH***",
+    "email": "user@example.com",
+    "address": "***",
+    "mobile": "***"
+  },
+  "file_type": "NSDL",
+  "nps": null,
+  "parse_warnings": []
+}

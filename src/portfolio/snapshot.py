@@ -1,4 +1,4 @@
-"""Snapshot orchestration (M1: Zerodha via daemon; M2: Moomoo direct OAuth).
+"""Snapshot orchestration (M1: Zerodha via daemon; M2: Moomoo via OpenD wrapper).
 
 One run per platform. The write pattern is deliberately split by kind so that
 repeated polling never fills the DB with junk:
@@ -6,21 +6,30 @@ repeated polling never fills the DB with junk:
   position (live state)          upserted IN PLACE every poll - the table does
                                  not grow no matter how often we poll (the v1 flaw:
                                  32 polls x holdings = 1,120 near-identical rows).
-  position_snapshot, price_history, portfolio_value
+  position_snapshot, price_history
                                  written ONLY on EOD runs - the daily ledger
                                  that makes YoY / day-on-day returns possible.
   runs                           one row per poll attempt (audit + lineage).
 
-`--platform all` (M2) runs the legs sequentially and then writes ONE consolidated
-portfolio_value set (scope all/geography/platform) across every holding, so the
-`all` scope is never clobbered by a later leg (UNIQUE(value_date, is_eod,
-scope_type, scope_key) upsert). The consolidated INR-base allocation is computed
-with the same one-rate-per-run FX table the legs used (process-wide cache in
-portfolio.fx), so position rows and the allocation always reconcile.
+`--platform all` (M2) runs the legs sequentially, then computes ONE consolidated
+INR-base allocation across every holding with the same one-rate-per-run FX table
+the legs used (process-wide cache in portfolio.fx), so position rows and the
+allocation always reconcile.
+
+The dashboard's value HISTORY is DERIVED from position_snapshot by
+portfolio.series at export time. The legacy portfolio_value write path was
+removed (F1): per-leg writes could never sum honestly across mixed-frequency
+legs (M-3 live proof: 2026-08-07 `all` = 3,829,419 excluded the whole CAS leg;
+the true total was 6,638,591). The table and its historical rows remain, unread.
 
 Live prices for the UI are fetched on demand over MCP (Refresh-now) and update
 `position` in place; they are not stored as ticks (design decision: live-fetch
 only, store EOD).
+
+M-2 audit contract: every failure mode of a leg (shape drift, normalize error,
+session expiry, persist error) writes a `runs` row (status='error') and surfaces
+as SessionNotReady - never a raw traceback, and `--all` continues past a failed
+leg so one broker cannot kill the others.
 """
 
 from __future__ import annotations
@@ -35,6 +44,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import httpx
 
@@ -42,13 +52,12 @@ from portfolio.alerts.telegram import send_snapshot_expiry_warning
 from portfolio.config import (
     DATA_DIR,
     DB_PATH,
-    PLATFORMS,
     ROOT_DIR,
     Settings,
-    platform_display_currency,
 )
 from portfolio.db import connect, writer
-from portfolio.fx import FXError, get_fx_rate, get_fx_rates
+from portfolio.db.persist import persist
+from portfolio.fx import get_fx_rates
 from portfolio.normalize.allocation import DIMENSIONS, compute_allocation
 from portfolio.normalize.moomoo import normalize_holdings as normalize_moomoo
 from portfolio.normalize.schema import Holding
@@ -57,7 +66,11 @@ from portfolio.serve import DEFAULT_PORT
 
 logger = logging.getLogger("portfolio.snapshot")
 
-LEGS = ("zerodha", "moomoo")  # groww lands in M3
+LEGS = ("zerodha", "moomoo")
+
+# Asia/Kolkata is the ledger's market-date timezone - NEVER machine-local
+# (NIT-2): a snapshot must record the same date on any host.
+_IST = ZoneInfo("Asia/Kolkata")
 
 
 class SessionNotReady(Exception):
@@ -71,19 +84,17 @@ class LegResult:
 
 
 def run_snapshot(platform: str, is_eod: bool = False, db_path: Path | None = None) -> str:
-    if platform not in ("zerodha", "groww", "moomoo", "all"):
+    if platform not in ("zerodha", "moomoo", "all"):
         raise ValueError(f"unknown platform: {platform!r}")
     if platform == "all":
         return _snapshot_all(is_eod=is_eod, db_path=db_path or DB_PATH)
-    if platform == "groww":
-        raise NotImplementedError("M3 adds Groww via its custom FastMCP wrapper.")
     if platform == "zerodha":
         return _snapshot_zerodha(is_eod=is_eod, db_path=db_path or DB_PATH).summary
     return _snapshot_moomoo(is_eod=is_eod, db_path=db_path or DB_PATH).summary
 
 
 def _snapshot_all(*, is_eod: bool, db_path: Path) -> str:
-    """Run every platform leg, then persist ONE consolidated value set + allocation."""
+    """Run every platform leg, then compute ONE consolidated allocation."""
     results: list[str] = []
     errors: list[str] = []
     all_holdings: list[Holding] = []
@@ -91,12 +102,12 @@ def _snapshot_all(*, is_eod: bool, db_path: Path) -> str:
     for leg in LEGS:
         try:
             if leg == "zerodha":
-                res = _snapshot_zerodha(is_eod=is_eod, db_path=db_path, write_values=False)
+                res = _snapshot_zerodha(is_eod=is_eod, db_path=db_path)
             else:
-                res = _snapshot_moomoo(is_eod=is_eod, db_path=db_path, write_values=False)
+                res = _snapshot_moomoo(is_eod=is_eod, db_path=db_path)
             results.append(f"{leg}: {res.summary}")
             all_holdings.extend(res.holdings)
-        except SessionNotReady as exc:
+        except Exception as exc:  # noqa: BLE001 - one bad leg must never kill the others
             errors.append(f"{leg}: {exc}")
 
     if not all_holdings:
@@ -112,10 +123,6 @@ def _snapshot_all(*, is_eod: bool, db_path: Path) -> str:
         rates = get_fx_rates(base, currencies)
         rates[base] = 1.0
         alloc = compute_allocation(all_holdings, rates, base=base)
-        if is_eod:
-            snapshot_date = datetime.now(UTC).astimezone().date().isoformat()
-            for scope_type, scope_key, value in _portfolio_values(all_holdings, base):
-                writer.upsert_portfolio_value(db, snapshot_date, True, scope_type, scope_key, value)
         share_lines = [
             f"{dim}: " + ", ".join(f"{k}={v:.1f}%" for k, v in alloc.shares(dim).items())
             for dim in DIMENSIONS
@@ -133,39 +140,91 @@ def _snapshot_all(*, is_eod: bool, db_path: Path) -> str:
 # ---- per-platform legs ------------------------------------------------------
 
 
-def _snapshot_zerodha(
-    *, is_eod: bool, port: int = DEFAULT_PORT, db_path: Path = DB_PATH, write_values: bool = True
-) -> LegResult:
+def _session_expired(raw: dict[str, Any]) -> bool:
+    """True when the daemon could not return holdings data.
+
+    Three shapes mean the same thing - the daily 6 AM Kite token expired and the
+    daemon needs a fresh browser login:
+      1. `login_required` set by the daemon's ToolResult marker detection,
+      2. an error text that mentions login,
+      3. an errored RPC with no parseable payload (e.g. "Failed to execute
+         get_holdings" when the connection's token is dead).
+    """
+    if raw.get("login_required"):
+        return True
+    if raw.get("parse") is not None:
+        return False
+    from portfolio.clients.base import LOGIN_REQUIRED_MARKERS
+
+    haystack = " ".join(raw.get("texts") or []) + " " + str(raw.get("error") or "")
+    low = haystack.lower()
+    if any(m in low for m in LOGIN_REQUIRED_MARKERS):
+        return True
+    return bool(raw.get("is_error")) and raw.get("texts")
+
+
+def _snapshot_zerodha(*, is_eod: bool, port: int = DEFAULT_PORT, db_path: Path = DB_PATH) -> LegResult:
     now = datetime.now(UTC)
     run_at = now.isoformat()
-    snapshot_date = now.astimezone().date().isoformat()  # local market date
+    snapshot_date = datetime.now(_IST).date().isoformat()  # market date, never machine-local
     db = _db_connection(db_path)
+    # F3: every failure mode must leave an audited `runs` row (M4's "failures
+    # visible in runs" bar). The daemon/RPC section below raises BEFORE any
+    # write_run exists, so its error row is written here - and this guard keeps
+    # the inner paths (session-expired, shape check, normalize/persist wrapper)
+    # from double-writing when they already logged their own row.
+    run_written = False
+
+    def _audit_failure(error: str) -> None:
+        nonlocal run_written
+        if not run_written:
+            writer.write_run(db, "zerodha", snapshot_date, run_at, "error", error=error, is_eod=is_eod)
+            run_written = True
 
     try:
-        ensure_zerodha_daemon()
-        raw = _fetch(port, "get_holdings", {})
-        if raw.get("login_required"):
+        try:
+            ensure_zerodha_daemon()
+            raw = _fetch(port, "get_holdings", {})
+        except SessionNotReady as exc:
+            # Daemon down or RPC unreachable: audit, then surface - never vanish.
+            _audit_failure(str(exc))
+            raise
+        if _session_expired(raw):
             send_snapshot_expiry_warning("zerodha", "session expired", settings=Settings())
-            writer.write_run(db, "zerodha", snapshot_date, run_at, "error", error="session expired", is_eod=is_eod)
+            _audit_failure("session expired")
             raise SessionNotReady("Zerodha session expired - run `portfolio serve --platform zerodha` to re-login")
 
         payload = raw.get("parse", [])
         if not isinstance(payload, list):
-            writer.write_run(
-                db, "zerodha", snapshot_date, run_at, "error",
-                error=f"unexpected holdings shape: {type(payload)!r}", is_eod=is_eod,
-            )
+            _audit_failure(f"unexpected holdings shape: {type(payload)!r}")
             raise SessionNotReady(f"unexpected holdings payload: {type(payload).__name__}")
 
-        holdings = normalize_zerodha(payload, sectors=_load_sectors())
+        # M-2: shape drift is the pipeline's #1 risk (PLAN §7). A malformed row
+        # must leave an audited `runs` error row and surface as SessionNotReady
+        # - never a raw traceback that kills `--all`'s remaining legs.
+        try:
+            holdings = normalize_zerodha(payload, sectors=_load_sectors())
+        except Exception as exc:  # noqa: BLE001 - audit, then re-raise
+            _audit_failure(str(exc))
+            raise SessionNotReady(f"zerodha snapshot failed: {exc}") from exc
+
         base = Settings().base_currency
         run_id = writer.write_run(db, "zerodha", snapshot_date, run_at, "running", is_eod=is_eod)
+        run_written = True
         try:
-            _persist(db, run_id, run_at, holdings, snapshot_date, base, is_eod, write_values=write_values)
-        except FXError as exc:
+            persist(db, run_id, run_at, holdings, snapshot_date, base, is_eod)
+        except Exception as exc:  # noqa: BLE001 - audit-only; never fail un-audited
             writer.update_run(db, run_id, "error", 0, error=str(exc))
             raise SessionNotReady(f"zerodha snapshot failed: {exc}") from exc
         writer.update_run(db, run_id, "ok", len(holdings))
+        if is_eod:
+            # Daily trade + funds capture (best-effort; XIRR input).
+            try:
+                from portfolio.trades import capture_trades
+
+                capture_trades("zerodha", db_path=db_path, port=port)
+            except Exception:  # noqa: BLE001 - must never fail the holdings run
+                logger.warning("zerodha trade/funds capture failed", exc_info=True)
         return LegResult(f"ok: {len(holdings)} holdings", holdings)
     except SessionNotReady:
         raise
@@ -173,25 +232,40 @@ def _snapshot_zerodha(
         db.close()
 
 
-def _snapshot_moomoo(*, is_eod: bool, db_path: Path = DB_PATH, write_values: bool = True) -> LegResult:
+def _snapshot_moomoo(*, is_eod: bool, db_path: Path = DB_PATH) -> LegResult:
     now = datetime.now(UTC)
     run_at = now.isoformat()
-    snapshot_date = now.astimezone().date().isoformat()
+    snapshot_date = datetime.now(_IST).date().isoformat()  # market date, never machine-local
     db = _db_connection(db_path)
 
     try:
-        holdings, acc_id = asyncio.run(_collect_moomoo())
+        # Collection + normalize (M-2): any failure - shape drift, OpenD down,
+        # account/position call errors - writes an audited `runs` error row and
+        # surfaces as SessionNotReady so `--all` can continue to the next leg.
+        try:
+            holdings, acc_id = asyncio.run(_collect_moomoo())
+        except Exception as exc:  # noqa: BLE001 - audit, then re-raise
+            writer.write_run(db, "moomoo", snapshot_date, run_at, "error", error=str(exc), is_eod=is_eod)
+            raise SessionNotReady(f"moomoo snapshot failed: {exc}") from exc
         base = Settings().base_currency
         run_id = writer.write_run(db, "moomoo", snapshot_date, run_at, "running", is_eod=is_eod)
         try:
-            _persist(
+            persist(
                 db, run_id, run_at, holdings, snapshot_date, base, is_eod,
-                write_values=write_values, account_ref=acc_id or "",
+                account_ref=acc_id or "",
             )
-        except FXError as exc:
+        except Exception as exc:  # noqa: BLE001 - audit-only; never fail un-audited
             writer.update_run(db, run_id, "error", 0, error=str(exc))
             raise SessionNotReady(f"moomoo snapshot failed: {exc}") from exc
         writer.update_run(db, run_id, "ok", len(holdings))
+        if is_eod and acc_id:
+            # Daily trade + funds capture (best-effort; XIRR input).
+            try:
+                from portfolio.trades import capture_trades
+
+                capture_trades("moomoo", db_path=db_path)
+            except Exception:  # noqa: BLE001 - must never fail the holdings run
+                logger.warning("moomoo trade/funds capture failed", exc_info=True)
         return LegResult(f"ok: {len(holdings)} holdings", holdings)
     except SessionNotReady:
         raise
@@ -257,101 +331,10 @@ def _pick_real_account(payload: Any) -> str | None:
 
 
 # ---- persistence -----------------------------------------------------------
-
-
-def _persist(
-    db: Any, run_id: int, run_at: str, holdings: list[Holding], snapshot_date: str,
-    base: str, is_eod: bool, *, write_values: bool = True, account_ref: str = "",
-) -> None:
-    """Write one run of holdings: live position always, history only on EOD."""
-    if not holdings:
-        return
-    platform = holdings[0].platform
-    account_id = writer.ensure_account(
-        db, platform, account_ref=account_ref,
-        base_currency=platform_display_currency(platform),
-    )
-    settings = Settings()
-    fx_cache: dict[str, tuple[float, int | None]] = {}
-
-    for h in holdings:
-        rec = h.as_record()
-        instrument_id = writer.ensure_instrument(
-            db, rec["platform"], rec["ticker"],
-            name=rec["name"], geography=rec["geography"], currency=rec["currency"],
-            sector=rec["sector"], asset_class=rec["asset_class"],
-        )
-        rate, fx_rate_id = _fx_for(db, snapshot_date, base, rec["currency"], settings, fx_cache)
-        value_base = rec["current_value"] * rate
-        cost_base = rec["cost_basis"] * rate if rec["cost_basis"] is not None else None
-
-        writer.upsert_position(
-            db, account_id, instrument_id,
-            quantity=rec["quantity"], avg_cost=rec["avg_price"], price=rec["current_price"],
-            cost_value_ccy=rec["cost_basis"], market_value_ccy=rec["current_value"],
-            market_value_base=value_base, cost_value_base=cost_base, updated_at=run_at,
-        )
-        if is_eod:
-            writer.upsert_position_snapshot(
-                db, run_id, account_id, instrument_id, fx_rate_id, snapshot_date,
-                quantity=rec["quantity"], avg_cost=rec["avg_price"], price=rec["current_price"],
-                cost_value_ccy=rec["cost_basis"], market_value_ccy=rec["current_value"],
-                market_value_base=value_base, cost_value_base=cost_base,
-            )
-            writer.upsert_price(db, instrument_id, snapshot_date, rec["current_price"], rec["currency"])
-
-    # The dashboard shows the account leg in its display currency (moomoo -> SGD),
-    # so persist those rates too - they come from the SAME er-api fetch (cached).
-    _ensure_display_rates(db, snapshot_date, base, settings)
-
-    if is_eod and write_values:
-        for scope_type, scope_key, value_base in _portfolio_values(holdings, base):
-            writer.upsert_portfolio_value(db, snapshot_date, is_eod, scope_type, scope_key, value_base)
-
-
-def _ensure_display_rates(
-    db: Any, snapshot_date: str, base: str, settings: Settings,
-) -> None:
-    """Persist fx rates for every account display currency that is not the base.
-
-    The one-rate-per-run fetch already downloaded the whole table; this just
-    stores the rows the dashboard needs (e.g. INR/SGD for the Moomoo leg).
-    """
-    for meta in PLATFORMS.values():
-        display = meta["display_currency"]
-        if display == base:
-            continue
-        rate = get_fx_rate(base, display)  # process-wide cache: no second fetch
-        writer.ensure_fx_rate(
-            db, snapshot_date, base, display, settings.fx_source, rate, datetime.now(UTC).isoformat()
-        )
-
-
-def _fx_for(
-    db: Any, snapshot_date: str, base: str, currency: str,
-    settings: Settings, cache: dict[str, tuple[float, int | None]],
-) -> tuple[float, int | None]:
-    """One rate per run per currency (M2 fetches it; identity pairs return 1.0)."""
-    if currency in cache:
-        return cache[currency]
-    rate = get_fx_rate(base, currency)
-    fx_id = writer.ensure_fx_rate(
-        db, snapshot_date, base, currency, settings.fx_source, rate, datetime.now(UTC).isoformat()
-    )
-    cache[currency] = (rate, fx_id)
-    return cache[currency]
-
-
-def _portfolio_values(holdings: list[Holding], base: str) -> list[tuple[str, str, float]]:
-    """Total portfolio value in base, per scope (all / geography / platform)."""
-    totals: dict[tuple[str, str], float] = {}
-    for h in holdings:
-        rec = h.as_record()
-        value = rec["current_value"] * get_fx_rate(base, rec["currency"])
-        for scope in (("all", ""), ("geography", rec["geography"]), ("platform", rec["platform"])):
-            totals[scope] = totals.get(scope, 0.0) + value
-    return [(scope_type, scope_key, total) for (scope_type, scope_key), total in totals.items()]
-
+#
+# The shared write path lives in portfolio.db.persist (MINOR-3) so snapshot,
+# CAS import and the AMFI NAV refresh all persist through the same module
+# instead of importing each other's privates.
 
 # ---- daemon RPC ----------------------------------------------------------
 
@@ -471,7 +454,10 @@ def _load_sectors() -> dict[str, tuple[str | None, str | None]]:
 
     lookup: dict[str, tuple[str | None, str | None]] = {}
     with csv_path.open(newline="", encoding="utf-8") as fh:
-        for row in _csv.DictReader(fh):
+        # Comment lines (leading '#') are skipped BEFORE DictReader so they can
+        # never become junk lookup entries (MINOR-4).
+        data_lines = (ln for ln in fh if not ln.lstrip().startswith("#"))
+        for row in _csv.DictReader(data_lines):
             ticker = (row.get("ticker") or "").strip()
             if ticker:
                 lookup[ticker] = (row.get("sector") or None, row.get("asset_class") or None)

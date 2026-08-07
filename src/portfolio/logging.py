@@ -29,7 +29,7 @@ REDACTED = "[REDACTED]"
 # label(s) followed by an = or : and a quoted/unquoted value.
 _GENERIC_SECRET = re.compile(
     r"(\b(?:access[_-]?token|refresh[_-]?token|api[_-]?key|apikey|auth[_-]?token"
-    r"|secret|password|passwd|bearer|authorization|login|request[_-]?token)"
+    r"|secret|password|passwd|bearer|authorization|login|session[_-]?id|request[_-]?token)"
     r"[\"']?\s*[:=]\s*[\"']?)([A-Za-z0-9._\-+/=]{6,})",
     re.IGNORECASE,
 )

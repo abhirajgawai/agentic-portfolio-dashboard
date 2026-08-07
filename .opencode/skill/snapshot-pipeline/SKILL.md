@@ -12,7 +12,8 @@ A run collects holdings from all platforms into a single point-in-time snapshot.
 2. **Calendar gate** (M4): skip platforms whose market is closed unless forced.
    - IN holidays: `data/holidays_in.csv`; US: `data/holidays_us.csv`.
    - Use exchange calendars (`trading_calendars`) for correctness.
-3. **Session check** (per platform): token valid? else `skipped_expired` + Telegram.
+3. **Session check** (per platform): token valid? else write a `runs` row
+   (status `error`, e.g. "session expired") + Telegram.
 4. **Collect**: for each platform, call allowlisted read-only MCP tools →
    normalizer → common schema rows.
 5. **FX**: one rate per run (`fx.py`) → `current_value_base` for all rows.
@@ -24,8 +25,11 @@ A run collects holdings from all platforms into a single point-in-time snapshot.
    `history.json`, `allocation.json`, `xirr.json`, `alerts.json`.
 
 ## CLI
-- `uv run pipeline snapshot [--eod] [--force] [--platform zerodha|groww|moomoo]`
-- `uv run pipeline status` — latest run + session health + staleness.
+- `uv run portfolio snapshot [--platform zerodha|moomoo|all] [--eod]`
+- `uv run portfolio cas import <statement.pdf>` — monthly Groww/IN holdings (no broker
+  session needed)
+- `uv run portfolio trades [--platform zerodha|moomoo|all]` — daily XIRR capture
+- `uv run portfolio status` — latest run + session health + staleness.
 
 ## Determinism
 - Identical inputs (same `run_at`, same market data) → identical DB rows and exports.

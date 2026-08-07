@@ -19,7 +19,8 @@ Snapshot rows add: `run_at (UTC)`, `snapshot_date`, `fx_rate_to_base`,
 
 ## Rules
 - One normalizer module per platform under `src/portfolio/normalize/`
-  (`zerodha.py`, `moomoo.py`, `groww.py`, `schema.py`).
+  (`zerodha.py`, `moomoo.py`, `schema.py`). Groww has no MCP normalizer — its
+  holdings map in `src/portfolio/cas_import.py` (CAS statement → common schema).
 - Read the pinned raw sample from `samples/<platform>/` FIRST. Map every field; don't
   guess field names from docs — use the actual captured output.
 - Sector/asset_class: prefer platform data if present; else join against the curated
@@ -32,3 +33,12 @@ Snapshot rows add: `run_at (UTC)`, `snapshot_date`, `fx_rate_to_base`,
 ## Verification
 - `uv run pytest tests/` passes; `uv run ruff check .` clean.
 - The consolidated allocation sums to 100% in base currency.
+
+## Reporting back (you are orchestrated)
+You were launched by the **orchestrator**. When finished, reply with exactly this shape so
+results can be aggregated across parallel workers:
+- **Files changed:** list of paths
+- **Built:** one line per deliverable
+- **Verified:** command(s) run + pass/fail + key numbers
+- **Blockers/decisions:** anything the orchestrator must resolve, or "none"
+Be concise and factual; do not restate the brief.

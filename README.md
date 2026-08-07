@@ -5,11 +5,24 @@ A personal, learning-first project that aggregates holdings across multiple brok
 Built phase by phase against a locked plan (`PLAN.md`); each phase is deterministic,
 tested, and verified before the next starts.
 
-> **Current status: M0 ✅ + M1 ✅ + M2 ✅** — Moomoo holdings path decided by the
-> M2 spike: the hosted MCP grants only `quote:read` to dynamic OAuth clients (account tools
-> 401), so Moomoo holdings come from the **OpenD gateway** via our own read-only FastMCP
-> wrapper (`moomoo_mcp/`). FX (one rate/run), the US normalizer, and consolidated INR
-> allocation (sums to 100%) are built and verified live against the real account.
+> **Current status: M0 ✅ · M1 ✅ · M2 ✅ · M3 ✅** (2026-08-07)
+>
+> - **M2** — Moomoo holdings come from the **OpenD gateway** via our own read-only FastMCP
+>   wrapper (`moomoo_mcp/`); the hosted MCP grants only `quote:read` to dynamic OAuth
+>   clients (spike finding). FX (one rate/run), the US normalizer, consolidated INR
+>   allocation (sums to 100%), and full-fidelity holdings (day P&L, schema v4) are built
+>   and verified live against the real account.
+> - **M3** — the paid Groww Trade API leg was **removed** (docs confirmed equities-only —
+>   no mutual funds, §2c of PLAN). Groww (stocks + MFs) now comes from the **free CAS
+>   import**: `portfolio cas import <statement.pdf>` parses the monthly Consolidated
+>   Account Statement with the MIT `casparser` library and was verified against the real
+>   June 2026 statement (27 CAS holdings: 13 Groww demat MFs, 7 folio MFs with cost basis
+>   → returns computable, 6 Sharekhan stocks, 1 Zerodha MF; Zerodha equities skipped —
+>   live MCP). **CAS MF + ETF prices refresh DAILY** via `portfolio nav refresh`
+>   (official AMFI `NAVAll.txt` feed, `mf_nav.py` — Indian ETFs are in the same
+>   feed); CAS equities keep the statement price until the next monthly import.
+> - **M4–M9 pending** — scheduling/calendars, returns/XIRR, alerts, Q&A agent, dashboard,
+>   deployment (see the table below).
 
 ---
 
@@ -18,9 +31,9 @@ tested, and verified before the next starts.
 | Phase | Builds | Status |
 |---|---|---|
 | M0 | uv project, SQLite schema v1, redacted logging, migrations | ✅ |
-| M1 | Zerodha MCP client, daily-login session daemon, snapshot pipeline, schema v2 | ✅ |
-| M2 | Moomoo MCP, FX (one rate/run), consolidated INR view | ⏳ next |
-| M3 | Groww custom FastMCP wrapper, daily trade capture | ⏳ |
+| M1 | Zerodha MCP client, daily-login session daemon, snapshot pipeline | ✅ |
+| M2 | Moomoo via OpenD gateway, FX (one rate/run), consolidated INR view, full-fidelity holdings | ✅ |
+| M3 | Groww via **free CAS import** + daily trade capture (paid Groww API leg **removed**) | ✅ 2026-08-07 |
 | M4 | Holiday/market-hours calendars, Windows Task Scheduler | ⏳ |
 | M5 | Returns, time series, XIRR | ⏳ |
 | M6 | Rule-based alerts → Telegram | ⏳ |
@@ -43,8 +56,16 @@ Task Scheduler ──> snapshot ─┤─> MCP client (allowlisted tools) ──
 ```
 
 Three brokers, three integration styles (the point of the project):
-- **Zerodha** (IN) — hosted MCP server `https://mcp.kite.trade/mcp`
-- **Groww** (IN) — official REST Trade API (`growwapi` SDK), wrapped in our own read-only FastMCP
+- **Zerodha** (IN) — hosted MCP server `https://mcp.kite.trade/mcp` (free)
+- **Groww** (IN) — **free CAS import** (`portfolio cas import`): the SEBI-mandated
+  Consolidated Account Statement, emailed monthly, parsed by the MIT `casparser`
+  library; covers Groww demat MFs + folio MFs + any other demat holdings (e.g.
+  Sharekhan). The ₹499/mo Trade API was evaluated and **removed** — it is
+  equities-only and can never return mutual funds (see `PLAN.md` §2c). **CAS-derived
+  MF + ETF prices refresh daily** via `portfolio nav refresh` — the official AMFI
+  `NAVAll.txt` feed (`mf_nav.py`, one keyless fetch per run; Indian ETFs are open-ended
+  schemes in the same feed); CAS **equities** have no AMFI NAV and keep the statement
+  price until the next monthly import.
 - **Moomoo** (US) — **OpenD gateway** (local desktop app holding the login) + official `moomoo-api`
   SDK, wrapped in our own read-only FastMCP (`moomoo_mcp/`). The hosted MCP
   `https://mcp.moomoo.com/mcp` was spike-tested and is **market-data only**: its OAuth token
@@ -86,10 +107,38 @@ research trail.
 ## Commands
 
 ```
-portfolio db migrate            apply pending SQL migrations (versioned)
-portfolio serve --platform zerodha   hold the day's session, serve read-only RPC (:8787)
-portfolio auth --platform moomoo     verify OpenD, store trade password, test read access
-portfolio snapshot --platform <zerodha|moomoo|groww|all> [--eod]
+portfolio db migrate                  apply pending SQL migrations (versioned)
+portfolio serve --platform zerodha    hold the day's session, serve read-only RPC (:8787)
+portfolio auth --platform moomoo      verify OpenD, store trade password, test read access
+portfolio snapshot --platform <zerodha|moomoo|all> [--eod]
+portfolio trades [--platform zerodha|moomoo|all]    daily trade + funds capture (XIRR input)
+portfolio cas import <file.pdf>       parse a CAS statement -> holdings + ledger (Groww/IN)
+portfolio nav refresh                 refresh MF prices from AMFI NAVAll.txt (daily, keyless)
+```
+
+### Groww via CAS (monthly, free)
+
+Groww has no MF-capable API, so holdings come from the **Consolidated Account
+Statement** — SEBI-mandated, emailed monthly, covering CDSL/NSDL demat + every MF
+folio:
+
+```sh
+# Drop the month's CAS PDF anywhere, then:
+uv run portfolio cas import data/cas/CAS-June2026.pdf
+#   statement=2026-06-30 | groww=20 | sharekhan=6 | zerodha=1 | returns_ok=7 | value_only=20
+```
+
+What lands in the DB (same tables the live legs use): Groww demat MFs + folio MFs +
+any other demat holdings, with `position_snapshot`/`price_history` stamped at the
+statement date. **Known limit:** the CAS carries no cost basis for demat MFs and
+equities, so those rows are *value-only* (`returns_ok` counts only the rows with a
+cost basis — the folio MFs); the UI renders "—" for their return%. Zerodha equities
+are skipped automatically (the live MCP leg already captures them — no double count).
+
+```sh
+# Between monthly statements, refresh CAS MF + ETF prices daily (free, keyless, one AMFI fetch):
+uv run portfolio nav refresh
+#   nav refresh: refreshed=21 | not_in_amfi=6   (the 6 Sharekhan equities stay at statement price)
 ```
 
 ### Moomoo setup (one-time, OpenD gateway)
@@ -111,7 +160,7 @@ uv run portfolio snapshot --platform all
 
 ---
 
-## Database (schema v2)
+## Database (schema v5)
 
 SQLite at `data/portfolio.db` (gitignored). Two kinds of tables, by design:
 
@@ -121,23 +170,31 @@ SQLite at `data/portfolio.db` (gitignored). Two kinds of tables, by design:
 - `instrument` — one row per (platform, ticker); the join key for everything
 - `position` — current qty/avg cost/value per instrument, plus `cost_value_base`
   (cost converted to INR at the run's fx rate, so return% is computable directly)
+  and **full-fidelity day P&L detail** (`prev_close`, `day_change_ccy/pct`,
+  `pnl_ccy/pct`, realized/unrealized P&L, `can_sell_qty`, `position_side`) and the
+  broker's raw payload (`raw_json` — no field is ever lost)
 
 **History — the daily ledger, written only on `--eod` runs (~35 rows/day):**
-- `position_snapshot` — per-holding EOD snapshot (FK to a `runs` row)
+- `position_snapshot` — per-holding EOD snapshot (FK to a `runs` row), same day/P&L
+  detail columns frozen daily
 - `price_history` — daily close per instrument
 - `portfolio_value` — total value by scope (all / geography / platform)
+- `account_funds` — cash / assets per account per day (get_margins / get_funds)
 
 **Market + audit:**
-- `fx_rate` — one rate per run (INR base; empty until M2)
-- `trade` — daily trade capture for XIRR (M3)
+- `fx_rate` — one rate per run (INR base)
+- `trade` — daily trade capture for XIRR (get_trades / get_fills), deduped by
+  UNIQUE(account_id, external_id)
 - `runs` — every pipeline run: status, row counts, `is_eod`, `snapshot_date`
 
-**Key constraints:** `position` is UNIQUE on `(platform, ticker)`; `price_history` is
-UNIQUE on `(instrument_id, price_date)`; re-running a day updates instead of duplicating.
+**Key constraints:** `position` is UNIQUE on `(account_id, instrument_id)`; `price_history`
+is UNIQUE on `(instrument_id, price_date)`; re-running a day updates instead of duplicating.
 
-Migrations live in `src/portfolio/db/migrations/` (e.g. `0002_v2_relational.sql` migrates
-v1 data into v2 and drops the old tables). `portfolio db migrate` applies pending ones
-sequentially.
+Migrations live in `src/portfolio/db/migrations/` and are applied sequentially:
+`0001` v1 (legacy), `0002` v2 relational (migrates + drops v1), `0003` account display
+currency + cost basis in base, `0004` full-fidelity holding detail + `account_funds`,
+`0005` drops the dead `instrument.instrument_type` column.
+`portfolio db migrate` applies pending ones (schema is at v5).
 
 ---
 
@@ -151,8 +208,9 @@ sequentially.
    redaction filter scrubs secrets from every log line. Committed `samples/` are pinned
    baselines; anything captured against an authenticated session (`*_authed.json`) is
    excluded from git.
-3. **No automated login** — Zerodha/Groww require daily manual 2FA (regulatory). The
-   daemon detects expiry and surfaces it; nothing scripts the browser.
+3. **No automated login** — Zerodha requires daily manual 2FA (regulatory). The
+   daemon detects expiry and surfaces it; nothing scripts the browser. (Groww needs
+   no login at all — its data comes from the emailed CAS + the keyless AMFI feed.)
 4. **Determinism boundary** — M0–M6 produce identical output for identical input.
 
 ---
@@ -161,20 +219,26 @@ sequentially.
 
 ```
 src/portfolio/
-  cli.py            typer CLI (db / serve / snapshot)
+  cli.py            typer CLI (db / serve / auth / snapshot / trades / cas)
   serve.py          session daemon: single task owns connect→login→serve→close
   snapshot.py       orchestrator: collect → normalize → write state (+ history on --eod)
+  trades.py         daily trade + account-funds capture (XIRR input)
+  cas_import.py     CAS statement → common schema (Groww/Sharekhan/MF holdings)
+  mf_nav.py         AMFI NAVAll.txt: one fetch per run, {isin → nav/date/name}
+  fx.py             one-rate-per-run FX (open.er-api.com, process-wide cache)
   clients/          per-broker MCP client, each with its read-only ALLOWLIST
-  normalize/        raw MCP output → common holding schema
+  normalize/        raw MCP output → common holding schema (incl. allocation)
   tokens/           token store + zerodha login helper (expiry detection)
-  db/               schema.sql migrations, migrate.py, writer.py (upserts)
-  config.py         env loading, platform registry
+  db/               migrations, migrate.py, writer.py (upserts)
+  config.py         env loading, platform registry (zerodha/groww/sharekhan/moomoo)
 scripts/probe_mcp.py   inspect-first: list tools, dump raw outputs to samples/
+scripts/export_json.py  emits the M8 latest.json contract from the DB
 samples/zerodha/        pinned MCP baselines (tool inventory, error shapes)
 samples/moomoo/         88-tool hosted-MCP inventory + spike diagnostics
+samples/cas/            scrubbed CAS fixture (PII masked) for regression
 samples/fx/             pinned open.er-api.com response (USD/SGD rates)
 moomoo_mcp/             read-only FastMCP wrapper over the OpenD gateway
-data/                   gitignored: portfolio.db, tokens.json, holidays/
+data/                   gitignored: portfolio.db, tokens.json, cas/, holidays/, logs/
 tests/                  pytest — normalizers, migrations, writer, client allowlist
 ```
 
@@ -184,7 +248,7 @@ tests/                  pytest — normalizers, migrations, writer, client allow
 
 ```sh
 uv run ruff check .        # lint
-uv run pytest              # 38 tests
+uv run pytest              # full suite
 ```
 
 Testing convention: raw MCP outputs are pinned in `samples/` *before* any normalizer is

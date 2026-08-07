@@ -30,7 +30,8 @@ Snapshot row adds: `run_at` (UTC ISO), `snapshot_date`, `fx_rate_to_base`,
 
 ## Files
 - `src/portfolio/normalize/schema.py` — dataclasses + validation.
-- `src/portfolio/normalize/zerodha.py`, `moomoo.py`, `groww.py` — one mapper each.
+- `src/portfolio/normalize/zerodha.py`, `moomoo.py` — one mapper per MCP platform.
+  (Groww has no MCP — its holdings map in `src/portfolio/cas_import.py`, CAS → schema.)
 - Each mapper reads the pinned raw sample in `samples/<platform>/` and maps fields
   by their ACTUAL names (from `mcp-inspection`), never guessed.
 

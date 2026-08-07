@@ -141,6 +141,22 @@ class MoomooOpendService:
         records = data.to_dict("records")
         return records[0] if records else {}
 
+    def get_fills(self, trd_env: str = "REAL", acc_id: str | int = "0", trd_market: str = "US") -> dict:
+        """Today's executed trades (deals) for the account. Read-only - the daily
+        trade ledger that XIRR needs; the account's fills cannot be backfilled."""
+        self.connect()
+        ret, data = self._ctx.deal_list_query(
+            code="", trd_env=trd_env, acc_id=int(acc_id), refresh_cache=True
+        )
+        if ret != RET_OK:
+            raise RuntimeError(f"deal_list_query failed: {data}")
+        if data is None or getattr(data, "empty", False):
+            return {"fills": []}
+        records = data.to_dict("records")
+        if isinstance(records, dict):
+            records = [records]
+        return {"fills": records}
+
 
 _service = MoomooOpendService()
 
@@ -176,6 +192,14 @@ def get_positions(trd_env: str = "REAL", acc_id: str | int = "0", refresh_cache:
 def get_funds(trd_env: str = "REAL", acc_id: str | int = "0", currency: str = "USD") -> dict:
     """Account funds: cash, market_val, total_assets, buying_power. Read-only."""
     return _service.get_funds(trd_env=trd_env, acc_id=acc_id, currency=currency)
+
+
+@server.tool()
+def get_fills(trd_env: str = "REAL", acc_id: str | int = "0", trd_market: str = "US") -> dict:
+    """Today's executed trades for the account: {"fills": [...]} with deal_id,
+    code, qty, price, trd_side, time, fee. Read-only - feeds the daily trade
+    ledger (XIRR input)."""
+    return _service.get_fills(trd_env=trd_env, acc_id=acc_id, trd_market=trd_market)
 
 
 def main() -> None:
