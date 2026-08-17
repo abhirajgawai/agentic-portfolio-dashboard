@@ -49,11 +49,13 @@ from zoneinfo import ZoneInfo
 import httpx
 
 from portfolio.alerts.telegram import send_snapshot_expiry_warning
+from portfolio.calendars import gate_check
 from portfolio.config import (
     DATA_DIR,
     DB_PATH,
     ROOT_DIR,
     Settings,
+    platform_geography,
 )
 from portfolio.db import connect, writer
 from portfolio.db.persist import persist
@@ -81,36 +83,64 @@ class SessionNotReady(Exception):
 class LegResult:
     summary: str
     holdings: list[Holding] = field(default_factory=list)
+    # Structural gate marker (MINOR-4): True for a calendar-skip leg. Kept on
+    # the dataclass so `--all` can decide all-skipped WITHOUT parsing strings.
+    skipped: bool = False
 
 
-def run_snapshot(platform: str, is_eod: bool = False, db_path: Path | None = None) -> str:
+def run_snapshot(
+    platform: str,
+    is_eod: bool = False,
+    db_path: Path | None = None,
+    *,
+    at: datetime | None = None,
+    force: bool = False,
+) -> str:
+    """Run one platform's snapshot (or all), gated by the M4 calendar.
+
+    `at` is the wall clock the calendar gate sees — injectable for tests and
+    retried runs (determinism: the gate must never read the clock itself; the
+    CLI is the caller and passes now(UTC)). `force` bypasses the gate.
+    A gate skip is NOT a failure: the leg writes an audited `skipped` runs row
+    and returns a skip summary instead of raising — a holiday must never touch
+    a broker or fail a scheduled run (exit code stays 0).
+    """
     if platform not in ("zerodha", "moomoo", "all"):
         raise ValueError(f"unknown platform: {platform!r}")
+    at = at or datetime.now(UTC)
     if platform == "all":
-        return _snapshot_all(is_eod=is_eod, db_path=db_path or DB_PATH)
+        return _snapshot_all(is_eod=is_eod, db_path=db_path or DB_PATH, at=at, force=force)
     if platform == "zerodha":
-        return _snapshot_zerodha(is_eod=is_eod, db_path=db_path or DB_PATH).summary
-    return _snapshot_moomoo(is_eod=is_eod, db_path=db_path or DB_PATH).summary
+        return _snapshot_zerodha(is_eod=is_eod, db_path=db_path or DB_PATH, at=at, force=force).summary
+    return _snapshot_moomoo(is_eod=is_eod, db_path=db_path or DB_PATH, at=at, force=force).summary
 
 
-def _snapshot_all(*, is_eod: bool, db_path: Path) -> str:
+def _snapshot_all(*, is_eod: bool, db_path: Path, at: datetime | None = None, force: bool = False) -> str:
     """Run every platform leg, then compute ONE consolidated allocation."""
     results: list[str] = []
     errors: list[str] = []
+    leg_results: list[LegResult] = []
     all_holdings: list[Holding] = []
 
     for leg in LEGS:
         try:
             if leg == "zerodha":
-                res = _snapshot_zerodha(is_eod=is_eod, db_path=db_path)
+                res = _snapshot_zerodha(is_eod=is_eod, db_path=db_path, at=at, force=force)
             else:
-                res = _snapshot_moomoo(is_eod=is_eod, db_path=db_path)
+                res = _snapshot_moomoo(is_eod=is_eod, db_path=db_path, at=at, force=force)
+            leg_results.append(res)
             results.append(f"{leg}: {res.summary}")
             all_holdings.extend(res.holdings)
         except Exception as exc:  # noqa: BLE001 - one bad leg must never kill the others
             errors.append(f"{leg}: {exc}")
 
     if not all_holdings:
+        # M4 gate: every leg skipped by the calendar is NOT a failure — a
+        # holiday/weekend is a normal no-op and the exit code must stay 0
+        # (each skipped leg already wrote its own audited `runs` row). Only
+        # real errors (or a genuinely empty run) surface as SessionNotReady.
+        if not errors and leg_results and all(r.skipped for r in leg_results):
+            return " | ".join(results) + " | all markets closed - nothing captured"
         detail = "; ".join(errors) if errors else "no holdings from any platform"
         raise SessionNotReady(f"snapshot --all produced no data ({detail})")
 
@@ -140,6 +170,25 @@ def _snapshot_all(*, is_eod: bool, db_path: Path) -> str:
 # ---- per-platform legs ------------------------------------------------------
 
 
+def _skip_leg(platform: str, reason: str, at: datetime, *, is_eod: bool, db_path: Path) -> LegResult:
+    """M4 calendar gate skip: audited `skipped` runs row; no broker touched, no raise.
+
+    A holiday is a normal no-op for a scheduled run — the row is the audit
+    trail M4's "failures visible in runs" bar needs, and the exit code stays 0.
+    snapshot_date is the MARKET date of the evaluated instant (`at`, injected
+    by the caller); started_at is the per-attempt audit instant. Writes through
+    the canonical writer.write_skipped (MINOR-5).
+    """
+    run_at = datetime.now(UTC).isoformat()
+    snapshot_date = at.astimezone(_IST).date().isoformat()  # market date, never machine-local
+    db = _db_connection(db_path)
+    try:
+        writer.write_skipped(db, platform, snapshot_date, run_at, reason, is_eod=is_eod)
+    finally:
+        db.close()
+    return LegResult(f"skipped ({reason})", skipped=True)
+
+
 def _session_expired(raw: dict[str, Any]) -> bool:
     """True when the daemon could not return holdings data.
 
@@ -163,10 +212,25 @@ def _session_expired(raw: dict[str, Any]) -> bool:
     return bool(raw.get("is_error")) and raw.get("texts")
 
 
-def _snapshot_zerodha(*, is_eod: bool, port: int = DEFAULT_PORT, db_path: Path = DB_PATH) -> LegResult:
-    now = datetime.now(UTC)
-    run_at = now.isoformat()
-    snapshot_date = datetime.now(_IST).date().isoformat()  # market date, never machine-local
+def _snapshot_zerodha(
+    *,
+    is_eod: bool,
+    port: int = DEFAULT_PORT,
+    db_path: Path = DB_PATH,
+    at: datetime | None = None,
+    force: bool = False,
+) -> LegResult:
+    at = at or datetime.now(UTC)
+    # M4 gate FIRST: a holiday/weekend/closed-window must never spawn the
+    # daemon or touch the broker - the skip is audited, not a failure.
+    reason = gate_check(platform_geography("zerodha"), at, is_eod=is_eod)
+    if reason and not force:
+        return _skip_leg("zerodha", reason, at, is_eod=is_eod, db_path=db_path)
+    # started_at is the per-attempt audit instant (runs.UNIQUE(platform,
+    # started_at) - two polls at the same injected `at` are still two runs);
+    # snapshot_date is the MARKET date of the evaluated instant (`at`).
+    run_at = datetime.now(UTC).isoformat()
+    snapshot_date = at.astimezone(_IST).date().isoformat()  # market date, never machine-local
     db = _db_connection(db_path)
     # F3: every failure mode must leave an audited `runs` row (M4's "failures
     # visible in runs" bar). The daemon/RPC section below raises BEFORE any
@@ -218,11 +282,12 @@ def _snapshot_zerodha(*, is_eod: bool, port: int = DEFAULT_PORT, db_path: Path =
             raise SessionNotReady(f"zerodha snapshot failed: {exc}") from exc
         writer.update_run(db, run_id, "ok", len(holdings))
         if is_eod:
-            # Daily trade + funds capture (best-effort; XIRR input).
+            # Daily trade + funds capture (best-effort; XIRR input). The same
+            # injected `at` gates it inside capture_trades (trading-day policy).
             try:
                 from portfolio.trades import capture_trades
 
-                capture_trades("zerodha", db_path=db_path, port=port)
+                capture_trades("zerodha", db_path=db_path, port=port, at=at)
             except Exception:  # noqa: BLE001 - must never fail the holdings run
                 logger.warning("zerodha trade/funds capture failed", exc_info=True)
         return LegResult(f"ok: {len(holdings)} holdings", holdings)
@@ -232,10 +297,24 @@ def _snapshot_zerodha(*, is_eod: bool, port: int = DEFAULT_PORT, db_path: Path =
         db.close()
 
 
-def _snapshot_moomoo(*, is_eod: bool, db_path: Path = DB_PATH) -> LegResult:
-    now = datetime.now(UTC)
-    run_at = now.isoformat()
-    snapshot_date = datetime.now(_IST).date().isoformat()  # market date, never machine-local
+def _snapshot_moomoo(
+    *,
+    is_eod: bool,
+    db_path: Path = DB_PATH,
+    at: datetime | None = None,
+    force: bool = False,
+) -> LegResult:
+    at = at or datetime.now(UTC)
+    # M4 gate FIRST: a US holiday/weekend/closed-window must never touch the
+    # OpenD gateway - the skip is audited, not a failure. The SAME `at` the
+    # caller injected is converted to NY time by the gate.
+    reason = gate_check(platform_geography("moomoo"), at, is_eod=is_eod)
+    if reason and not force:
+        return _skip_leg("moomoo", reason, at, is_eod=is_eod, db_path=db_path)
+    # started_at is the per-attempt audit instant; snapshot_date is the MARKET
+    # date of the evaluated instant (`at`).
+    run_at = datetime.now(UTC).isoformat()
+    snapshot_date = at.astimezone(_IST).date().isoformat()  # market date, never machine-local
     db = _db_connection(db_path)
 
     try:
@@ -259,11 +338,12 @@ def _snapshot_moomoo(*, is_eod: bool, db_path: Path = DB_PATH) -> LegResult:
             raise SessionNotReady(f"moomoo snapshot failed: {exc}") from exc
         writer.update_run(db, run_id, "ok", len(holdings))
         if is_eod and acc_id:
-            # Daily trade + funds capture (best-effort; XIRR input).
+            # Daily trade + funds capture (best-effort; XIRR input). The same
+            # injected `at` gates it inside capture_trades (trading-day policy).
             try:
                 from portfolio.trades import capture_trades
 
-                capture_trades("moomoo", db_path=db_path)
+                capture_trades("moomoo", db_path=db_path, at=at)
             except Exception:  # noqa: BLE001 - must never fail the holdings run
                 logger.warning("moomoo trade/funds capture failed", exc_info=True)
         return LegResult(f"ok: {len(holdings)} holdings", holdings)

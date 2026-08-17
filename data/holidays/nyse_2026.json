@@ -1,0 +1,17 @@
+{
+  "exchange": "NYSE",
+  "year": 2026,
+  "source": "https://www.nyse.com/markets/hours-calendars (official) ; ICE press release https://ir.theice.com/press/news-details/2025/NYSE-Group-Announces-2026-2027-and-2028-Holiday-and-Early-Closings-Calendar/default.aspx ; cross-checked against https://www.financecalendar.com/stock-market-holidays/ and https://www.finder.com/stock-trading/nyse-holidays",
+  "holidays": [
+    {"date": "2026-01-01", "name": "New Year's Day"},
+    {"date": "2026-01-19", "name": "Martin Luther King, Jr. Day"},
+    {"date": "2026-02-16", "name": "Washington's Birthday"},
+    {"date": "2026-04-03", "name": "Good Friday"},
+    {"date": "2026-05-25", "name": "Memorial Day"},
+    {"date": "2026-06-19", "name": "Juneteenth National Independence Day"},
+    {"date": "2026-07-03", "name": "Independence Day (observed)"},
+    {"date": "2026-09-07", "name": "Labor Day"},
+    {"date": "2026-11-26", "name": "Thanksgiving Day"},
+    {"date": "2026-12-25", "name": "Christmas Day"}
+  ]
+}

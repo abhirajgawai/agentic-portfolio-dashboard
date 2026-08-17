@@ -8,8 +8,10 @@ M1:  `portfolio serve --platform zerodha`   (persistent session daemon + daily l
 from __future__ import annotations
 
 import logging
+import re
 import sys
 from contextlib import suppress
+from datetime import UTC, datetime
 from typing import Annotated
 
 import typer
@@ -29,6 +31,8 @@ cas_app = typer.Typer(help="CAS (Consolidated Account Statement) import - Groww/
 app.add_typer(cas_app, name="cas")
 nav_app = typer.Typer(help="AMFI NAV commands (daily MF price refresh).")
 app.add_typer(nav_app, name="nav")
+fx_app = typer.Typer(help="Foreign exchange commands (daily rate table, keyless).")
+app.add_typer(fx_app, name="fx")
 
 logger = logging.getLogger("portfolio.cli")
 
@@ -64,10 +68,33 @@ def db_migrate() -> None:
 def serve(
     platform: Annotated[str, typer.Option(help="zerodha (only platform in M1)")] = "zerodha",
     port: Annotated[int, typer.Option(help="loopback RPC port")] = 8787,
+    gate: Annotated[bool, typer.Option(
+        help="exit 0 quietly when today is not an IN trading day (scheduled daemon start)"
+    )] = False,
 ) -> None:
-    """Hold the day's authenticated broker session and serve read-only RPC."""
+    """Hold the day's authenticated broker session and serve read-only RPC.
+
+    With `--gate` (OPT-IN, for the scheduled 09:35 start): the daemon only
+    starts on an IN trading day. On a weekend/holiday it prints `skipped
+    (<reason>)` and exits 0 WITHOUT launching the daemon or prompting the
+    daily manual 2FA login for a session nothing will use (guardrail #3 -
+    the login is manual; we simply avoid triggering it on closed days). The
+    policy is trading-day (is_eod=True): the daemon serves both the 09:45
+    live and the 15:45 EOD runs, so any trading day qualifies, at any time.
+
+    Default (no --gate) is unchanged: manual `portfolio serve` and
+    snapshot.py's daemon auto-spawn stay ungated, so a --force holiday
+    snapshot can still spawn the daemon.
+    """
     if platform != "zerodha":
         raise typer.BadParameter("M1 supports only --platform zerodha")
+    if gate:
+        from portfolio.calendars import gate_check
+
+        reason = gate_check("IN", _now_utc(), is_eod=True)
+        if reason:
+            typer.echo(f"skipped ({reason})")
+            return
     from portfolio import serve as serve_mod
 
     typer.echo(f"starting {platform} session daemon on 127.0.0.1:{port} ...")
@@ -135,16 +162,51 @@ def auth(
 @app.command("trades")
 def trades(
     platform: Annotated[str, typer.Option(help="zerodha | moomoo | all")] = "all",
+    force: Annotated[bool, typer.Option(help="bypass the market-hours/holiday gate")] = False,
 ) -> None:
-    """Capture today's trades for XIRR (daily; same-day history only on Kite)."""
+    """Capture today's trades for XIRR (daily; same-day history only on Kite).
+
+    Calendar-gated as an EOD-style task (is_eod=True: trading-day check only):
+    an all-closed market writes an audited `skipped` runs row and exits 0 - a
+    holiday is not a failure. `--platform all` runs when ANY market is a
+    trading day; closed legs are skipped per-leg inside the capture path and
+    never touch their broker (MAJOR-2).
+
+    Run audit (MAJOR-1, mirrors nav refresh): once the gate passes, one
+    platform='trades' row per attempt - 'running' before capture, 'ok' with
+    rows=<new trades captured> on success, 'error' on failure + exit 1 - so a
+    capture failure is VISIBLE in `runs`, never a silent exit 0.
+    """
     from portfolio.snapshot import SessionNotReady
     from portfolio.trades import capture_trades
 
+    at = _now_utc()
+    if not force:
+        reason = _trades_skip_reason(at, platform)
+        if reason:
+            _write_skipped_run("trades", reason, at, is_eod=True)
+            typer.echo(f"trades capture {platform}: skipped ({reason})")
+            return
+    # Gate passed (or --force): the run gets a full audit lifecycle. The DB
+    # path is resolved once so the runs row and the capture write the SAME db.
+    db_path = _db_path()
+    run_id = _write_running_run("trades", at, db_path, is_eod=True)
     try:
-        result = capture_trades(platform)
+        result = capture_trades(platform, db_path=db_path, at=at)
     except SessionNotReady as exc:
+        _update_run_row(run_id, "error", 0, str(exc), db_path)
         typer.echo(f"trades capture {platform}: FAILED - {exc}", err=True)
         raise typer.Exit(code=1) from exc
+    except Exception as exc:  # noqa: BLE001 - belt for unexpected bugs (e.g.
+        # trades.SessionNotReady is a SEPARATE class from snapshot's - the
+        # except above can miss it): any capture failure must still land an
+        # audited error row and exit 1, never a raw traceback in a scheduled
+        # job's log.
+        _update_run_row(run_id, "error", 0, str(exc), db_path)
+        logger.error("trades capture %s crashed: %s", platform, exc)
+        typer.echo(f"trades capture {platform}: FAILED - unexpected error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    _update_run_row(run_id, "ok", _new_trades_count(result), None, db_path)
     typer.echo(f"trades capture {platform}: {result}")
 
 
@@ -168,7 +230,9 @@ def cas_import(
 
 
 @nav_app.command("refresh")
-def nav_refresh() -> None:
+def nav_refresh(
+    force: Annotated[bool, typer.Option(help="bypass the market-hours/holiday gate")] = False,
+) -> None:
     """Refresh CAS-derived MF + ETF prices from the official AMFI NAVAll.txt (daily, free, keyless).
 
     One AMFI fetch per run. Updates every CAS-derived mutual fund AND ETF position's
@@ -176,15 +240,75 @@ def nav_refresh() -> None:
     a price_history + position_snapshot row for today, and logs a `runs` row
     (platform='amfi'). Live-leg positions (zerodha/moomoo) are never touched; CAS
     equities have no AMFI NAV and stay at the statement price until the next import.
+
+    Calendar-gated on the IN trading-day policy (is_eod=True): on a holiday or
+    weekend the command writes an audited platform='amfi' `skipped` runs row
+    and exits 0 WITHOUT touching the AMFI feed - a holiday is not a failure.
     """
+    from portfolio.calendars import gate_check
     from portfolio.mf_nav import NAVError, refresh_nav_prices
 
+    at = _now_utc()
+    if not force:
+        reason = gate_check("IN", at, is_eod=True)
+        if reason:
+            _write_skipped_run("amfi", reason, at, is_eod=True)
+            typer.echo(f"nav refresh: skipped ({reason})")
+            return
     try:
         result = refresh_nav_prices()
     except NAVError as exc:
         typer.echo(f"nav refresh: FAILED - {exc}", err=True)
         raise typer.Exit(code=1) from exc
     typer.echo(f"nav refresh: {result}")
+
+
+@fx_app.command("refresh")
+def fx_refresh() -> None:
+    """Fetch ONE rate table per run and persist it to fx_rates (M4 21:30 leg).
+
+    Ungated by design: FX is a global market - the 21:30 IST slot is mid-session
+    in the US, so there is no exchange calendar to consult. rate_date is the
+    Asia/Kolkata date; UNIQUE(rate_date, base, quote, source) makes a same-day
+    re-run a no-op (idempotent).
+
+    Run audit (MAJOR-3): one platform='fx' row per attempt - 'running' before
+    the fetch, 'ok' with rows=<quotes persisted> on success, 'error' + exit 1
+    on FXError - so the keyless leg is visible to the runs audit (the M9
+    staleness monitor reads runs).
+    """
+    from zoneinfo import ZoneInfo
+
+    from portfolio.config import Settings
+    from portfolio.db import connect, writer
+    from portfolio.fx import FXError, get_fx_rates
+
+    base = Settings().base_currency
+    quotes = ["USD", "SGD"]
+    at = _now_utc()
+    rate_date = at.astimezone(ZoneInfo("Asia/Kolkata")).date().isoformat()
+    db_path = _db_path()
+    conn = connect(db_path)
+    try:
+        run_id = writer.write_run(
+            conn, "fx", rate_date, datetime.now(UTC).isoformat(), "running", is_eod=True,
+        )
+        try:
+            rates = get_fx_rates(base, quotes)
+        except FXError as exc:
+            writer.update_run(conn, run_id, "error", 0, error=str(exc))
+            typer.echo(f"fx refresh: FAILED - {exc}", err=True)
+            raise typer.Exit(code=1) from exc
+        for quote in quotes:
+            writer.ensure_fx_rate(
+                conn, rate_date, base, quote, Settings().fx_source,
+                rates[quote], at.isoformat(),
+            )
+        writer.update_run(conn, run_id, "ok", len(quotes))
+    finally:
+        conn.close()
+    summary = " ".join(f"{q}{base}={_fmt_rate(rates[q])}" for q in quotes)
+    typer.echo(f"fx refresh: {summary}")
 
 
 def _opend_reachable(host: str = "127.0.0.1", port: int = 11111) -> bool:
@@ -197,16 +321,139 @@ def _opend_reachable(host: str = "127.0.0.1", port: int = 11111) -> bool:
         return False
 
 
+# ---- M4 calendar-gate helpers -------------------------------------------------
+#
+# The gate policy lives in portfolio.calendars (pure). These helpers wire it
+# into the CLI: a closed market writes an audited `skipped` runs row and exits
+# 0 - a holiday is a normal no-op for a scheduled job, not a failure.
+
+
+def _now_utc() -> datetime:
+    """The wall clock for gate decisions (one place, injectable in tests).
+
+    The CLI is the caller of the gate: it is allowed to read the clock; the
+    gate itself (portfolio.calendars) never does.
+    """
+    return datetime.now(UTC)
+
+
+def _db_path() -> str:
+    """The runs/fx DB path, honoring the PORTFOLIO_DB_PATH env override
+    config.py reads (tests point it at a tmp db without touching the real
+    one). Commands resolve it ONCE and use it for both audit rows and the
+    capture/persist calls so the two can never diverge.
+    """
+    import os
+
+    from portfolio.config import DB_PATH
+
+    return os.getenv("PORTFOLIO_DB_PATH", str(DB_PATH))
+
+
+def _write_skipped_run(platform: str, reason: str, at: datetime, *, is_eod: bool) -> None:
+    """Audited gate skip: one `runs` row, no broker/feed touched, exit stays 0.
+
+    The row is what makes the skip VISIBLE in the runs audit (M4 bar). Writes
+    through the canonical writer.write_skipped (MINOR-5): snapshot_date is the
+    market date of the evaluated instant (`at`), started_at the real now.
+    """
+    from zoneinfo import ZoneInfo
+
+    from portfolio.db import connect, writer
+
+    snapshot_date = at.astimezone(ZoneInfo("Asia/Kolkata")).date().isoformat()
+    conn = connect(_db_path())
+    try:
+        writer.write_skipped(
+            conn, platform, snapshot_date, datetime.now(UTC).isoformat(),
+            reason, is_eod=is_eod,
+        )
+    finally:
+        conn.close()
+
+
+def _write_running_run(platform: str, at: datetime, db_path: str, *, is_eod: bool) -> int:
+    """Start a run's audit lifecycle: one 'running' row the caller flips to
+    ok/error via _update_run_row (mirrors the nav-refresh contract, MAJOR-1)."""
+    from zoneinfo import ZoneInfo
+
+    from portfolio.db import connect, writer
+
+    snapshot_date = at.astimezone(ZoneInfo("Asia/Kolkata")).date().isoformat()
+    conn = connect(db_path)
+    try:
+        return writer.write_run(
+            conn, platform, snapshot_date, datetime.now(UTC).isoformat(),
+            "running", is_eod=is_eod,
+        )
+    finally:
+        conn.close()
+
+
+def _update_run_row(run_id: int, status: str, rows: int, error: str | None, db_path: str) -> None:
+    """Flip a run row to its final status (each write commits immediately, so a
+    fresh connection by run id is safe)."""
+    from portfolio.db import connect, writer
+
+    conn = connect(db_path)
+    try:
+        writer.update_run(conn, run_id, status, rows, error=error)
+    finally:
+        conn.close()
+
+
+# "N new trades (M seen)" -> N; a combined `--all` summary carries one count
+# per leg, so the totals SUM (rows is best-effort audit metadata: unparseable
+# -> 0).
+_NEW_TRADES_RE = re.compile(r"(\d+)\s+new trades")
+
+
+def _new_trades_count(result: str) -> int:
+    return sum(int(m) for m in _NEW_TRADES_RE.findall(result or ""))
+
+
+def _trades_skip_reason(at: datetime, platform: str) -> str | None:
+    """Trade-capture gate: None when at least one market can run, else the
+    combined reason (an all-closed `--all` skips with ONE platform='trades'
+    row).
+
+    Trade capture is an EOD-style daily task, so the gate uses the is_eod=True
+    policy (trading-day check only, any time of day); dedupe on
+    UNIQUE(account_id, external_id) makes re-capture harmless.
+    """
+    from portfolio.calendars import gate_check
+    from portfolio.config import platform_geography
+
+    if platform == "all":
+        reasons = []
+        for leg in ("zerodha", "moomoo"):
+            reason = gate_check(platform_geography(leg), at, is_eod=True)
+            if reason:
+                reasons.append(f"{leg}: {reason}")
+        return "; ".join(reasons) if len(reasons) == 2 else None
+    return gate_check(platform_geography(platform), at, is_eod=True)
+
+
+def _fmt_rate(value: float) -> str:
+    """2-decimal display - the summary's contract (USDINR=88.12 SGDINR=67.90)."""
+    return f"{value:.2f}"
+
+
 @app.command("snapshot")
 def snapshot(
     platform: Annotated[str, typer.Option(help="zerodha | moomoo | all")] = "zerodha",
     eod: Annotated[bool, typer.Option(help="mark run as end-of-day")] = False,
+    force: Annotated[bool, typer.Option(help="bypass the market-hours/holiday gate")] = False,
 ) -> None:
-    """Run a snapshot for a platform."""
+    """Run a snapshot for a platform (calendar-gated unless --force).
+
+    A closed market (weekend/holiday/outside hours) is skipped with an audited
+    `runs` row and exit 0, never a failure; --force bypasses the gate.
+    """
     from portfolio.snapshot import SessionNotReady, run_snapshot
 
     try:
-        result = run_snapshot(platform, is_eod=eod)
+        result = run_snapshot(platform, is_eod=eod, force=force)
     except SessionNotReady as exc:
         typer.echo(f"snapshot {platform}: FAILED - {exc}", err=True)
         raise typer.Exit(code=1) from exc
@@ -216,6 +463,46 @@ def snapshot(
         typer.echo(f"snapshot {platform}: FAILED - unexpected error: {exc}", err=True)
         raise typer.Exit(code=1) from exc
     typer.echo(f"snapshot {platform}: {result}")
+
+
+@app.command("returns")
+def returns() -> None:
+    """Print M5 returns diagnostics - per-account XIRR + simple-return coverage.
+
+    READ-ONLY compute (a verification tool, not a scheduled job): no gate, no
+    runs row - the schedule does not need it. XIRR is per (account, FLOW
+    currency) - zerodha INR, moomoo USD; flows are never converted (no
+    complete historical FX for backfilled trades). An account with no captured
+    trades yet prints "—" (flows genuinely missing), never an error.
+    """
+    from portfolio.db import connect
+    from portfolio.returns import account_xirrs, simple_return_summary
+
+    db_path = _db_path()
+    conn = connect(db_path)
+    try:
+        today = datetime.now(UTC).date().isoformat()
+        per_account = account_xirrs(conn, today=today)
+        if per_account:
+            for key, acc in sorted(per_account.items()):
+                rate = f"{acc.xirr_rate * 100:.2f}%" if acc.xirr_rate is not None else "—"
+                typer.echo(
+                    f"xirr {key} [{acc.currency}]: {rate}"
+                    f" (flows={acc.flow_count}, terminal={acc.terminal_value:,.2f})"
+                )
+        else:
+            typer.echo("xirr: no captured trades yet - every account's flows are genuinely missing")
+        summary = simple_return_summary(conn)
+        if summary["portfolio_return"] is not None:
+            port = f"{summary['portfolio_return'] * 100:.2f}%"
+        else:
+            port = "—"
+        typer.echo(
+            f"simple return: portfolio={port} ({summary['holdings']} holdings: "
+            f"{summary['with_cost']} with / {summary['no_cost']} without cost basis)"
+        )
+    finally:
+        conn.close()
 
 
 if __name__ == "__main__":

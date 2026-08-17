@@ -20,11 +20,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from portfolio.config import DB_PATH, platform_display_currency
+from portfolio.calendars import gate_check
+from portfolio.config import DB_PATH, platform_display_currency, platform_geography
 from portfolio.db import connect, writer
 from portfolio.serve import DEFAULT_PORT
 
@@ -55,13 +56,98 @@ def _fetch(port: int, tool: str, args: dict[str, Any]) -> dict[str, Any]:
 # ---- dispatcher ---------------------------------------------------------------
 
 
-def capture_trades(platform: str, *, db_path=DB_PATH, port: int = DEFAULT_PORT) -> str:
-    """Capture one platform's daily trades (+ funds). Returns a summary string."""
+def capture_trades(
+    platform: str,
+    *,
+    db_path=DB_PATH,
+    port: int = DEFAULT_PORT,
+    at: datetime | None = None,
+) -> str:
+    """Capture one platform's daily trades (+ funds). Returns a summary string.
+
+    Calendar-gated PER LEG with the trading-day policy (is_eod=True, MAJOR-2):
+    a closed market writes an audited platform='trades' `skipped` runs row and
+    returns a skip summary WITHOUT touching the broker - a holiday is not a
+    failure. `at` is the injected wall clock (default now(UTC)); the gate
+    never reads the clock itself.
+    """
+    if platform == "all":
+        return _capture_all(db_path, port, at)
+    if platform == "zerodha":
+        return _capture_gated("zerodha", db_path, port, at)
+    if platform == "moomoo":
+        return _capture_gated("moomoo", db_path, port, at)
+    raise ValueError(f"unknown platform: {platform!r}")
+
+
+def _capture_gated(platform: str, db_path, port: int, at: datetime | None) -> str:
+    """Gate one leg, then capture. Defense-in-depth: the CLI pre-gates single
+    platforms and `--all` gates per leg, so this only fires for direct callers
+    (e.g. the snapshot legs) - and for them the answer is the same gate at the
+    same instant, so a passing snapshot leg always passes here too."""
+    at = at or datetime.now(UTC)
+    reason = gate_check(platform_geography(platform), at, is_eod=True)
+    if reason:
+        _write_skip(db_path, reason, at)
+        return f"skipped ({reason})"
     if platform == "zerodha":
         return _capture_zerodha(db_path, port)
-    if platform == "moomoo":
-        return asyncio.run(_capture_moomoo(db_path))
-    raise ValueError(f"unknown platform: {platform!r}")
+    return asyncio.run(_capture_moomoo(db_path))
+
+
+def _capture_all(db_path, port: int, at: datetime | None) -> str:
+    """Per-leg gated `--all` (MAJOR-2): a closed leg is skipped with an audited
+    platform='trades' row and NEVER touches its broker; open legs capture.
+
+    - All legs closed -> combined skip summary, exit 0 (not a failure).
+    - Any leg that RAN and failed -> raise SessionNotReady with the combined
+      message. The caller (the CLI) flips its own platform='trades' run row to
+      'error' and exits non-zero on that raise - no double-write here.
+    """
+    at = at or datetime.now(UTC)
+    parts: list[str] = []
+    errors: list[str] = []
+    ran = False
+    # Per-leg skip rows share platform='trades', so their started_at must
+    # differ (runs.UNIQUE(platform, started_at)) - offset each row by a
+    # microsecond from one base instant.
+    base = datetime.now(UTC)
+    for i, leg in enumerate(("zerodha", "moomoo")):
+        reason = gate_check(platform_geography(leg), at, is_eod=True)
+        if reason:
+            started_at = (base + timedelta(microseconds=i)).isoformat()
+            _write_skip(db_path, f"{leg}: {reason}", at, started_at=started_at)
+            parts.append(f"{leg}: skipped ({reason})")
+            continue
+        ran = True
+        try:
+            parts.append(f"{leg}: " + capture_trades(leg, db_path=db_path, port=port, at=at))
+        except Exception as exc:  # noqa: BLE001 - one bad leg must never kill the others
+            errors.append(f"{leg}: {exc}")
+            parts.append(f"{leg}: FAILED - {exc}")
+    if not ran:
+        return "; ".join(parts)  # every leg closed: skip rows already audited
+    if errors:
+        raise SessionNotReady("; ".join(errors))
+    return "; ".join(parts)
+
+
+def _write_skip(db_path, reason: str, at: datetime, *, started_at: str | None = None) -> None:
+    """Audited 'skipped' runs row for a closed market (platform='trades').
+
+    snapshot_date is the market date of the evaluated instant (`at`);
+    started_at defaults to the real now (per-attempt audit instant).
+    """
+    snapshot_date = at.astimezone(_IST).date().isoformat()
+    db = connect(db_path)
+    try:
+        writer.write_skipped(
+            db, "trades", snapshot_date,
+            started_at or datetime.now(UTC).isoformat(),
+            reason, is_eod=True,
+        )
+    finally:
+        db.close()
 
 
 # ---- zerodha (sync, daemon RPC) -----------------------------------------------

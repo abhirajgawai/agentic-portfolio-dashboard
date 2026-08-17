@@ -2,10 +2,18 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 import pytest
 
 import portfolio.trades as trades
 from portfolio.db.migrate import migrate
+
+# M4: capture_trades now gates per leg (trading-day policy), so tests inject a
+# deterministic clock on a trading day (2026-08-06 Thu, inside NSE hours) -
+# never datetime.now().
+AT_OPEN = datetime(2026, 8, 6, 10, 0, tzinfo=ZoneInfo("Asia/Kolkata"))
 
 
 @pytest.fixture()
@@ -33,7 +41,7 @@ def test_capture_zerodha_writes_signed_trades(db, monkeypatch):
     monkeypatch.setattr(trades, "ensure_zerodha_daemon", lambda **kw: None)
     monkeypatch.setattr(trades, "_fetch", lambda port, tool, args: _kite_trades())
 
-    result = trades.capture_trades("zerodha", db_path=db)
+    result = trades.capture_trades("zerodha", db_path=db, at=AT_OPEN)
     assert "2 new trades (2 seen)" in result
 
     from portfolio.db import connect
@@ -58,8 +66,8 @@ def test_capture_zerodha_dedupes_on_rerun(db, monkeypatch):
     monkeypatch.setattr(trades, "ensure_zerodha_daemon", lambda **kw: None)
     monkeypatch.setattr(trades, "_fetch", lambda port, tool, args: _kite_trades())
 
-    trades.capture_trades("zerodha", db_path=db)
-    result = trades.capture_trades("zerodha", db_path=db)
+    trades.capture_trades("zerodha", db_path=db, at=AT_OPEN)
+    result = trades.capture_trades("zerodha", db_path=db, at=AT_OPEN)
     assert "0 new trades (2 seen)" in result
 
     from portfolio.db import connect

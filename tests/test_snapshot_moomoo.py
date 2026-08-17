@@ -8,7 +8,9 @@ one-rate-per-run contract intact.
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -19,6 +21,16 @@ from portfolio.normalize.moomoo import normalize_holdings as normalize_moomoo
 FIXTURE = Path(__file__).parent / "fixtures" / "zerodha_holdings.json"
 
 USD_INR = 90.0
+
+# M4: the calendar gate now guards run_snapshot, so tests inject a
+# deterministic wall clock. No single instant is inside BOTH NSE (09:15-15:30
+# IST) and NYSE (09:30-16:00 ET) hours, so:
+#   - single moomoo legs use a US-open instant (21:30 IST == 12:00 EDT),
+#   - live `--all` runs use force=True (their point is persist/allocation, not
+#     the gate - which has its own tests in test_gate.py).
+# 2026-08-06 is a Thursday, no holiday in the committed data/holidays lists.
+IST = ZoneInfo("Asia/Kolkata")
+AT_US_OPEN = datetime(2026, 8, 6, 21, 30, tzinfo=IST)  # 12:00 EDT, NYSE open
 
 
 @pytest.fixture()
@@ -86,7 +98,7 @@ def test_pick_real_account_prefers_trd_env_over_acc_type():
 
 def test_moomoo_snapshot_writes_position_with_fx(db, monkeypatch):
     monkeypatch.setattr(snap, "_collect_moomoo", _moomoo_collect())
-    result = snap.run_snapshot("moomoo", db_path=db)
+    result = snap.run_snapshot("moomoo", db_path=db, at=AT_US_OPEN)
     assert "2 holdings" in result
 
     from portfolio.db import connect
@@ -138,7 +150,7 @@ def test_moomoo_unavailable_warns_and_fails(db, monkeypatch):
 def test_all_non_eod_keeps_consolidated_position_rows(db, monkeypatch):
     monkeypatch.setattr(snap, "_fetch", lambda port, tool, args: _zerodha_rpc())
     monkeypatch.setattr(snap, "_collect_moomoo", _moomoo_collect())
-    result = snap.run_snapshot("all", db_path=db)
+    result = snap.run_snapshot("all", db_path=db, force=True)
 
     from portfolio.db import connect
 
@@ -159,7 +171,7 @@ def test_all_eod_writes_no_portfolio_value_rows(db, monkeypatch):
     position_snapshot at export time (portfolio.series), never stored."""
     monkeypatch.setattr(snap, "_fetch", lambda port, tool, args: _zerodha_rpc())
     monkeypatch.setattr(snap, "_collect_moomoo", _moomoo_collect())
-    snap.run_snapshot("all", is_eod=True, db_path=db)
+    snap.run_snapshot("all", is_eod=True, db_path=db, at=AT_US_OPEN)
 
     from portfolio.db import connect
 
@@ -182,7 +194,7 @@ def test_moomoo_collect_failure_writes_runs_error(db, monkeypatch):
 
     monkeypatch.setattr(snap, "_collect_moomoo", _collect_fails)
     with pytest.raises(snap.SessionNotReady, match="OpenD"):
-        snap.run_snapshot("moomoo", db_path=db)
+        snap.run_snapshot("moomoo", db_path=db, at=AT_US_OPEN)
 
     from portfolio.db import connect
 
@@ -196,7 +208,7 @@ def test_moomoo_collect_failure_writes_runs_error(db, monkeypatch):
 def test_all_allocation_sums_to_100(db, monkeypatch):
     monkeypatch.setattr(snap, "_fetch", lambda port, tool, args: _zerodha_rpc())
     monkeypatch.setattr(snap, "_collect_moomoo", _moomoo_collect())
-    result = snap.run_snapshot("all", db_path=db)
+    result = snap.run_snapshot("all", db_path=db, force=True)
 
     # result layout: each dimension is its own "|"-separated part now.
     parts = result.split(" | ")
@@ -221,7 +233,7 @@ def test_all_continues_when_one_leg_fails(db, monkeypatch):
     )
     monkeypatch.setattr(snap, "_collect_moomoo", _moomoo_collect())
 
-    result = snap.run_snapshot("all", db_path=db)
+    result = snap.run_snapshot("all", db_path=db, force=True)
 
     from portfolio.db import connect
 

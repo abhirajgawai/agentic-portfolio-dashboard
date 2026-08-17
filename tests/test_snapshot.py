@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -11,6 +13,12 @@ import portfolio.snapshot as snap
 from portfolio.db.migrate import migrate
 
 FIXTURE = Path(__file__).parent / "fixtures" / "zerodha_holdings.json"
+
+# M4: the calendar gate now guards run_snapshot, so tests must inject a
+# deterministic wall clock inside NSE hours on a trading day (2026-08-06 is a
+# Thursday, no holiday in the committed data/holidays lists) - never now().
+IST = ZoneInfo("Asia/Kolkata")
+AT_OPEN = datetime(2026, 8, 6, 10, 0, tzinfo=IST)  # inside NSE 09:15-15:30 IST
 
 
 @pytest.fixture()
@@ -27,7 +35,7 @@ def _rpc_payload_ok() -> dict:
 
 def test_snapshot_writes_live_position_and_run_log(db, monkeypatch) -> None:
     monkeypatch.setattr(snap, "_fetch", lambda port, tool, args: _rpc_payload_ok())
-    result = snap.run_snapshot("zerodha", db_path=db)
+    result = snap.run_snapshot("zerodha", db_path=db, at=AT_OPEN)
     assert "3 holdings" in result
 
     from portfolio.db import connect
@@ -56,7 +64,7 @@ def test_repeated_polls_do_not_grow_position(db, monkeypatch) -> None:
     """The 'no junk' rule: 100 polls still leave exactly one row per holding."""
     monkeypatch.setattr(snap, "_fetch", lambda port, tool, args: _rpc_payload_ok())
     for _ in range(5):
-        snap.run_snapshot("zerodha", db_path=db)
+        snap.run_snapshot("zerodha", db_path=db, at=AT_OPEN)
 
     from portfolio.db import connect
 
@@ -68,7 +76,7 @@ def test_repeated_polls_do_not_grow_position(db, monkeypatch) -> None:
 
 def test_eod_run_writes_daily_history(db, monkeypatch) -> None:
     monkeypatch.setattr(snap, "_fetch", lambda port, tool, args: _rpc_payload_ok())
-    snap.run_snapshot("zerodha", is_eod=True, db_path=db)
+    snap.run_snapshot("zerodha", is_eod=True, db_path=db, at=AT_OPEN)
 
     from portfolio.db import connect
 
@@ -85,8 +93,8 @@ def test_eod_run_writes_daily_history(db, monkeypatch) -> None:
 
 def test_eod_rerun_same_day_updates_not_duplicates(db, monkeypatch) -> None:
     monkeypatch.setattr(snap, "_fetch", lambda port, tool, args: _rpc_payload_ok())
-    snap.run_snapshot("zerodha", is_eod=True, db_path=db)
-    snap.run_snapshot("zerodha", is_eod=True, db_path=db)
+    snap.run_snapshot("zerodha", is_eod=True, db_path=db, at=AT_OPEN)
+    snap.run_snapshot("zerodha", is_eod=True, db_path=db, at=AT_OPEN)
 
     from portfolio.db import connect
 
@@ -105,7 +113,7 @@ def test_expired_session_warns_and_logs_error(db, monkeypatch) -> None:
                                   "login_required": True, "parse": None},
     )
     with pytest.raises(snap.SessionNotReady):
-        snap.run_snapshot("zerodha", db_path=db)
+        snap.run_snapshot("zerodha", db_path=db, at=AT_OPEN)
 
     from portfolio.db import connect
 
@@ -126,7 +134,7 @@ def test_daemon_down_raises_clear_error(db, monkeypatch) -> None:
 
     monkeypatch.setattr(snap, "_fetch", _down)
     with pytest.raises(snap.SessionNotReady, match="serve"):
-        snap.run_snapshot("zerodha", db_path=db)
+        snap.run_snapshot("zerodha", db_path=db, at=AT_OPEN)
 
     from portfolio.db import connect
 
@@ -150,7 +158,7 @@ def test_daemon_spawn_timeout_writes_runs_error(db, monkeypatch) -> None:
 
     monkeypatch.setattr(snap, "ensure_zerodha_daemon", _never_up)
     with pytest.raises(snap.SessionNotReady, match="daemon did not come up"):
-        snap.run_snapshot("zerodha", db_path=db)
+        snap.run_snapshot("zerodha", db_path=db, at=AT_OPEN)
 
     from portfolio.db import connect
 
@@ -173,7 +181,7 @@ def test_malformed_holdings_row_writes_error_run_and_raises(db, monkeypatch) -> 
         lambda port, tool, args: {"tool": "get_holdings", "texts": [], "parse": payload, "login_required": False},
     )
     with pytest.raises(snap.SessionNotReady, match="zerodha snapshot failed"):
-        snap.run_snapshot("zerodha", db_path=db)
+        snap.run_snapshot("zerodha", db_path=db, at=AT_OPEN)
 
     from portfolio.db import connect
 

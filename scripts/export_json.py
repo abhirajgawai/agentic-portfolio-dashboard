@@ -30,10 +30,12 @@ from pathlib import Path
 
 from portfolio.config import DB_PATH, ROOT_DIR, Settings
 from portfolio.db import connect
+from portfolio.returns import account_xirrs
 from portfolio.series import portfolio_series
 
 OUT = ROOT_DIR / "dashboard" / "public" / "data" / "latest.json"
 OUT_HISTORY = ROOT_DIR / "dashboard" / "public" / "data" / "history.json"
+OUT_XIRR = ROOT_DIR / "dashboard" / "public" / "data" / "xirr.json"
 
 # Staleness thresholds (days) per platform: brokers refresh daily, CAS platforms
 # refresh on the monthly import cadence (M-4). Positions older than this mark the
@@ -224,6 +226,23 @@ def export(db_path: Path = DB_PATH, out: Path = OUT) -> Path:
         history = portfolio_series(conn, base)
         OUT_HISTORY.parent.mkdir(parents=True, exist_ok=True)
         OUT_HISTORY.write_text(json.dumps(history, indent=2), encoding="utf-8")
+
+        # M5: xirr.json - per-account XIRR in each group's FLOW currency (never
+        # a fabricated INR conversion: there is no complete historical FX for
+        # backfilled trades). asOf = this export's run instant; estimated=false
+        # because the flows are real captured trades, not snapshot-delta
+        # estimates. Flat, dashboard-friendly: one entry per account key.
+        per_account: dict[str, dict] = {}
+        for acc in account_xirrs(conn, today=now.date().isoformat()).values():
+            per_account[acc.key] = {
+                "currency": acc.currency,
+                "xirrPct": round(acc.xirr_rate * 100.0, 4) if acc.xirr_rate is not None else None,
+                "terminalValue": round(acc.terminal_value, 2),
+                "flowCount": acc.flow_count,
+            }
+        xirr_payload = {"asOf": now.isoformat(), "perAccount": per_account, "estimated": False}
+        OUT_XIRR.parent.mkdir(parents=True, exist_ok=True)
+        OUT_XIRR.write_text(json.dumps(xirr_payload, indent=2), encoding="utf-8")
         return out
     finally:
         conn.close()
@@ -233,3 +252,4 @@ if __name__ == "__main__":
     path = export()
     print(f"exported -> {path}")
     print(f"exported -> {OUT_HISTORY}")
+    print(f"exported -> {OUT_XIRR}")

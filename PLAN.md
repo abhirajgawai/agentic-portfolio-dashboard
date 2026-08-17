@@ -228,10 +228,14 @@ Agent tools: portfolio-data MCP (read-only SQL views) + broker MCPs (allowlisted
    provider API key, if available — does not block the project.)
 2. **Scheduling vs manual tokens — the "two kinds of work" deployment split.** The
    pipeline has exactly two kinds of legs and they deploy differently:
-   - **Manual-token legs** (regulatory daily 2FA): Zerodha's session daemon (session dies
-     at ~6 AM IST; the hosted Kite MCP does not resume sessions) and Moomoo's OpenD
-     gateway (a desktop app holding the login). These MUST run on a machine with a
-     desktop — the user's always-on Windows box via Task Scheduler, where the tokens live.
+- **Manual-token legs** (regulatory daily 2FA): Zerodha's session daemon (session dies
+      at ~6 AM IST; the hosted Kite MCP does not resume sessions) and Moomoo's OpenD
+      gateway (a desktop app holding the login). **CORRECTION 2026-08-07 (user constraint:
+      no always-on laptop):** the Zerodha daemon is pure Python and runs fine on a
+      headless always-on host — the daily 2FA becomes a login link you open from any
+      browser/phone (Kite's hosted MCP completes the exchange server-side). Only Moomoo's
+      OpenD really wants a desktop, so it can stay a best-effort laptop leg
+      (staleness-tolerant). Details + three host options in M9.
    - **Keyless / official-API legs**: CAS import (monthly email), AMFI NAV + FX refresh
      (daily, keyless), alert evaluation, dashboard export. These are cloud-friendly and
      move to GitHub Actions cron (free) after the Supabase migration.
@@ -396,31 +400,110 @@ Tokens live in `data/tokens.json` (gitignored), never in the DB or snapshots.
   nav refresh` for the CAS leg.
 
 
-### M4 — Scheduling + calendars (1–2 evenings)
-- Static holiday JSONs (NSE, NYSE — published yearly lists) + weekend check.
-- Market windows via `zoneinfo("Asia/Kolkata")` / `zoneinfo("America/New_York")` —
-  never hardcoded IST offsets (US session shifts with DST; IST doesn't).
-- Task Scheduler jobs, every run gated by calendar/hours and logged to `runs`. Target
-  local day (the "live locally" phase — all legs on the always-on Windows box):
+### M4 — Scheduling + calendars (1–2 evenings) ✅ DONE 2026-08-07 (gate: APPROVE)
+- **Holiday data:** committed static lists `data/holidays/nse_2026.json` (16 closures
+  incl. the Maharashtra municipal-election day 01-15) and `nyse_2026.json` (10 incl.
+  observed 07-03 for Jul 4, a Saturday) — cross-checked against broker-published
+  official lists, sources cited in the files. **Year-rolling:** the gate picks the
+  file by the YEAR of the date it evaluates (`holidays_pattern` `"nse_{year}.json"`),
+  so 2027 = dropping `nse_2027.json`/`nyse_2027.json` into `data/holidays/` — no code
+  edit; a missing year file degrades to weekday-only with a warning naming it.
+- **`calendars.py` (pure gate):** `is_trading_day` / `market_open` / `reason_closed` /
+  `gate_check(geography, dt, *, is_eod)` — NSE 09:15–15:30 `Asia/Kolkata`, NYSE
+  09:30–16:00 `America/New_York`, zoneinfo ONLY (never hardcoded offsets; DST-proof —
+  tests pin 09:30 EDT vs EST by exact UTC math). Open inclusive / close exclusive
+  (15:45 IST EOD fires after the 15:30 close). Lazy holiday cache; a missing/corrupt
+  file degrades to weekday-only with a warning (the gate is advisory — it must never
+  hard-fail a scheduled run). Every function takes `dt` — the module never reads a
+  clock (determinism; naive datetimes refused).
+- **Gate wiring (policy: weekend/holiday blocks live AND EOD; trading-day EOD passes at
+  any time; live polls only inside [open, close)):**
+  - `run_snapshot(platform, is_eod, db_path, *, at=None, force=False)` — gate fires
+    BEFORE daemon spawn / broker calls (tests assert `daemon_calls == []` on holidays);
+    a skip writes an audited `runs` row (`status='skipped'`, `error='skipped: <reason>'`)
+    and returns a summary — a holiday is a normal no-op, exit 0. `--all` all-skipped
+    returns a clean per-leg summary (never `SessionNotReady`); real errors still audit
+    + raise. `--force` bypasses the gate (manual runs).
+  - `trades` — per-leg gate with the trading-day policy; a closed leg NEVER touches its
+    broker (`--all` on a US holiday runs zerodha, skips moomoo); full run audit:
+    `running` → `ok` (rows = new trades) / `error` + exit 1.
+  - `nav refresh` — IN trading-day gate; on a holiday writes a `platform='amfi'`
+    skipped row and does NOT touch the AMFI feed.
+  - **NEW `portfolio fx refresh`** (the 21:30 keyless leg, ungated — FX is global):
+    one `get_fx_rates` call → `fx_rate` rows, `platform='fx'` run audit, idempotent via
+    UNIQUE(rate_date, base, quote, source).
+  - `serve --gate` (09:35 daemon start, scheduled only): exits 0 quietly on
+    non-IN-trading days WITHOUT launching the daemon or prompting the 2FA login — the
+    task still fires daily, but a weekend/holiday is a no-op instead of a pointless
+    login prompt (manual `portfolio serve` and the snapshot daemon-spawn stay ungated,
+    so a `--force` holiday snapshot can still spawn it).
+  - `writer.write_skipped` is the single canonical skip-row helper; `LegResult.skipped`
+    makes the all-skipped check structural.
+- **Task Scheduler (all 7 registered + verified `Ready` on the always-on box, machine
+  local = IST; scripts in `scripts/scheduler/`, reversal via `unregister_tasks.ps1`):**
 
-  | Time (IST) | Job | Manual? |
-  |---|---|---|
-  | 09:35 | `portfolio serve --platform zerodha` (daemon up, waits for the 2FA login) | ✅ ~1 min/day |
-  | 09:45 + 15:45 | `portfolio snapshot --all` (zerodha + moomoo; 15:45 is `--eod`) | — |
-  | 15:50 | `portfolio trades` (daily capture for XIRR) | — |
-  | 21:30 | CAS import + AMFI NAV + FX refresh (monthly / daily, keyless) | monthly PDF drop |
-  | after EOD | `scripts/export_json.py` → dashboard JSON | — |
-  | any run | expired-session detection → Telegram reminder | — |
+  | Time (IST) | Task | Command | Manual? |
+  |---|---|---|---|
+  | 09:35 | `PortfolioServeZerodha` | `portfolio serve --platform zerodha --gate` (daemon up, waits for the 2FA login; no-op on non-trading days) | ✅ ~1 min/day |
+  | 09:45 | `PortfolioSnapshotMorning` | `portfolio snapshot --all` | — |
+  | 15:45 | `PortfolioSnapshotEod` | `portfolio snapshot --all --eod` | — |
+  | 15:50 | `PortfolioTrades` | `portfolio trades` | — |
+  | 15:55 | `PortfolioExportJson` | `scripts/export_json.py` → dashboard JSON | — |
+  | 21:30 | `PortfolioNavRefresh` | `portfolio nav refresh` | — |
+  | 21:35 | `PortfolioFxRefresh` | `portfolio fx refresh` | — |
 
+  Wrappers call the venv python directly (`%ROOT%\.venv\Scripts\python.exe -m
+  portfolio.cli ...`, CWD-independent, no `uv run` in scheduled tasks), append to
+  gitignored `data/logs/<job>.log`, and carry NO `--force` — the pipeline's own gate
+  handles holidays/weekends, so tasks fire daily and no-op on closed days.
+- **Known limits (documented, acceptable):** the 09:45 live `--all` skips moomoo
+  ("before open (09:30 EDT)") — the US leg is captured at the 15:45 EOD run; the 15:50
+  trades task captures US fills only up to ~06:20 ET (later fills land on the next run
+  with their own `trade_date` — XIRR dates stay correct, one day of lag); NYSE
+  early-close days (e.g. Black Friday 13:00 ET) count as full days — irrelevant to an
+  all-IST schedule; `fx refresh` prints the fetched rate even when a morning snapshot
+  already stored the day's rate (first writer wins — one rate per day preserved).
 - ✅ Done when: one week runs unattended; holidays/weekends skipped and logged; failures
-  visible in `runs`.
+  visible in `runs`. **Verification:** ruff clean; `uv run pytest` 114 passed / 2
+  skipped (15 calendar + 10 gate tests); gate probe exact (`gate_check('IN',
+  2026-01-26 10:00 IST)` → `holiday: Republic Day`); real `fx refresh` landed an `ok`
+  `runs` row + day's rates live; 7 tasks registered + paths resolve
+  (`scripts/scheduler/list_tasks.ps1`).
 
-### M5 — Returns & XIRR (2 evenings)
-- Per-holding return `(currentValue - costBasis) / costBasis`; time series from EOD
-  snapshots (value grows with age — snapshots start in M1).
-- XIRR from accumulated `trades` + current value as terminal cashflow; Newton/bisection
-  solver (~20 lines), tested against a hand-computable fixture.
-- ✅ Done when: XIRR matches the fixture; charts render from real accumulated data.
+### M5 — Returns & XIRR (2 evenings) ✅ DONE 2026-08-17 (gate: APPROVE)
+- **`src/portfolio/returns.py` (new, pure/read-only):** `per_holding_return` /
+  `portfolio_simple_return` — `(value − cost)/cost`; NULL/zero cost (M3's value-only
+  CAS demat MFs/equities) → `None`, never a crash. `series_change_pct` — trailing
+  1/7/30-day change from the derived series, honest with mixed-frequency gaps (picks
+  the newest point inside the window, never pretends a 45-day span is a "1-day" move).
+- **XIRR solver (pure Python, no new deps, ~200 lines incl. docs):** solves
+  `Σ cfᵢ/(1+r)^(tᵢ/365) = 0` by **bisection on log-space** (`x = log(1+r)`, handles
+  r→−1 and huge r) with a **Newton polish**; the NPV is rewritten so the root is
+  identical but can't overflow (`exp(x·(d_max−t)/365)` × positive factor), exp-clamped,
+  precision 1e-9 → output rounded to 4dp, strict iteration caps. Cash-flow convention:
+  `trade.amount_ccy` is stored SIGNED (+buy/−sell), so the flow is `−amount_ccy`
+  (buy = outflow, sell = inflow), pinned end-to-end against the trades.py writers.
+  `account_xirrs(conn, today)` — read-only per **(account, FLOW currency)** (zerodha
+  INR, moomoo USD): trade rows + terminal = Σ current position value in that currency
+  dated `today` (never before the last trade). **Cross-currency XIRR is out of scope**
+  (no complete historical FX for backfilled trades) — flows are NEVER converted.
+- **Output:** `portfolio returns` CLI (read-only verification tool, not scheduled) +
+  `scripts/export_json.py` now also writes **`dashboard/public/data/xirr.json`**
+  `{asOf, perAccount: {"<platform>__<ref|id>": {currency, xirrPct|null, terminalValue,
+  flowCount}}, estimated: false}`; latest.json/history.json behavior unchanged.
+- **Fixture-corrected during review:** the 183-day case is **20.94%**
+  (`1.1^(365/183)−1`, hand-verified by the reviewer), not the brief's placeholder
+  21.74% — the test pins the true value.
+- ✅ Done when: XIRR matches the fixture. **Verification:** ruff clean; `uv run pytest`
+  127 passed / 2 skipped (9 new returns tests: 10% one-year exact, 20.94% hand-computed,
+  degenerate→None suite incl. garbage dates, DB-backed path with real writer signs,
+  terminal-dated-today, no-trades-absent); independent solver cross-check 0.242 =
+  textbook bisection; live `portfolio returns` = simple return **+46.48%** (68 holdings:
+  48 with / 20 without cost basis — matches M3's coverage). **Two honesty notes:** (1)
+  real XIRR numbers wait for captured trades — the production DB has zero `trade` rows
+  (capture is scheduled from M4; the one Aug-07 attempt errored on a daemon timeout and
+  the box was off Aug 15–17) — reported as `None`/`{}`, never fabricated; (2) the
+  "charts render" half of the bar is M8 scope by design.
 
 ### M6 — Alerts, rule-based only (1–2 evenings)
 - Declarative `rules.yaml`: daily drop > X%, target/stop cross, RSI/MA crossovers.
@@ -495,20 +578,34 @@ it directly or via an edge function); Refresh-now becomes a serverless function 
 ### M9 — Deployment (2–3 evenings)
 - Migrate SQLite → Supabase (schema ports 1:1) — the shared spine: local legs and cloud
   legs write the SAME store (SQLite's single-writer rule forbids two hosts).
+- **Host constraint (user, 2026-08-07: "cannot keep the laptop on forever").** The
+  always-on-Windows-box assumption is dropped. Three options, all deployable:
+  - **A. Cheap/free VPS (recommended):** a small Linux VM (Oracle Cloud Always Free tier
+    = ₹0, else ~₹150–250/mo) runs the Zerodha daemon + the scheduled broker-leg jobs.
+    The daily 2FA becomes "daemon sends you the login link via Telegram; you approve on
+    your phone" — no browser on the server. Moomoo OpenD on a headless box is the awkward
+    bit (needs a virtual desktop) — see C.
+  - **B. Old always-on device at home (₹0, simplest for Moomoo):** a retired laptop /
+    NUC / mini-PC with a desktop runs BOTH broker legs exactly as today (Task Scheduler
+    on it); the cloud handles the rest.
+  - **C. Stale-tolerant laptop-only (₹0):** broker legs run only while the laptop is on
+    (manual `--force` or on-wake catch-up); the staleness monitor nags when live prices
+    go stale. Charts/history/NAV/FX stay current regardless (cloud legs).
 - **The split (§3 resolution #2):**
-  - **Stays on the always-on Windows box:** Zerodha daemon + its daily 2FA, and the
-    Moomoo OpenD leg (desktop app — see the OpenD caveat below). Only the human's 2FA
-    can never move.
+  - **Stays on an always-on broker-leg host (Option A or B):** the Zerodha daemon + its
+    daily 2FA (the link-click is the only human step) and the Moomoo OpenD leg (desktop
+    app — see the OpenD caveat). Only the human's 2FA can never move.
   - **Moves to GitHub Actions cron (free):** CAS email fetch (Gmail OAuth) + import,
     AMFI NAV refresh, FX refresh, alert evaluation → Telegram, dashboard export.
     Secrets in Actions env (Gmail refresh token, Telegram, Supabase service key).
 - Dashboard → Vercel/Netlify reading Supabase; agent on-demand (serverless or local).
 - Staleness monitor: Telegram if today's EOD run is missing; CI grep-guard failing on
   accidental token/secret patterns.
-- **Cost: ₹0** — GH Actions + Vercel free tiers; no paid API dependencies (Groww CAS
-  and AMFI NAV are free by design, §2c).
-- ✅ Done when: hosted dashboard shows live data; a deliberately-skipped local run triggers
-  the staleness alert.
+- **Cost: ₹0 on the cloud side** — GH Actions + Vercel free tiers; no paid API
+  dependencies (Groww CAS and AMFI NAV are free by design, §2c); Option A adds
+  ₹0–250/mo, B and C are ₹0.
+- ✅ Done when: hosted dashboard shows live data; a deliberately-skipped broker-leg run
+  triggers the staleness alert.
 
 ---
 

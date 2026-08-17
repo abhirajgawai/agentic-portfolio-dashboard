@@ -56,6 +56,29 @@ def update_run(conn: Any, run_id: int, status: str, rows: int, error: str | None
     conn.commit()
 
 
+def write_skipped(
+    conn: Any,
+    platform: str,
+    snapshot_date: str,
+    started_at: str,
+    reason: str,
+    *,
+    is_eod: bool,
+) -> int:
+    """One audited calendar-gate skip (M4): status='skipped' with
+    error='skipped: <reason>'. The canonical skip row - snapshot legs, the
+    trades/nav CLI gates and per-leg capture skips all write through here.
+
+    Shares the runs UNIQUE(platform, started_at) key with write_run, so
+    callers must keep started_at unique per platform (per-leg skips within
+    one run offset it by microseconds).
+    """
+    return write_run(
+        conn, platform, snapshot_date, started_at, "skipped",
+        error=f"skipped: {reason}", is_eod=is_eod,
+    )
+
+
 # ---- dimensions ------------------------------------------------------------
 
 def ensure_account(
