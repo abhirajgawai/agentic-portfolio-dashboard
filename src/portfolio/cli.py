@@ -17,6 +17,7 @@ from typing import Annotated
 import typer
 
 from portfolio import __version__
+from portfolio.agent.client import DEFAULT_BASE_URL
 from portfolio.db.migrate import migrate
 from portfolio.logging import setup_logging
 
@@ -558,6 +559,80 @@ def alerts(
         )
     finally:
         conn.close()
+
+
+@app.command("ask")
+def ask(
+    question: Annotated[str, typer.Argument(help="the question for the portfolio Q&A agent")],
+    max_turns: Annotated[int, typer.Option(
+        "--max-turns", help="max agentic turns (tool calls) before abort"
+    )] = 12,
+    timeout: Annotated[float, typer.Option(
+        "--timeout", help="wall-clock budget in seconds before abort"
+    )] = 180.0,
+    agent_name: Annotated[str, typer.Option(
+        "--agent", help="which configured agent should answer"
+    )] = "portfolio-analyst",
+    base_url: Annotated[str, typer.Option(
+        "--base-url", help="opencode serve base URL (start it with `opencode serve`)"
+    )] = DEFAULT_BASE_URL,
+    no_audit: Annotated[bool, typer.Option(
+        "--no-audit", help="skip the JSONL tool-call audit log (default writes it)"
+    )] = False,
+) -> None:
+    """Ask the read-only portfolio analyst (M7) - one question, one answer.
+
+    Talks to a RUNNING `opencode serve` instance (start it first in another
+    window; the M7 eval starts its own). The agent is `portfolio-analyst`:
+    MCP tools are allowlisted per-agent and every destructive tool is denied
+    globally, so this command can never place an order.
+
+    Budget (enforced CLIENT-side, the plan's design): `max_turns` counts tool
+    calls and `timeout` is the wall-clock budget; breaching either fires
+    POST /session/:id/abort and the partial answer is returned flagged
+    aborted/timed_out. Every tool call is appended to
+    data/logs/agent_audit.jsonl (gitignored) - tool name + redacted args - the
+    audit trail the M7 eval replays. Answers are READ-ONLY views over the
+    pipeline DB; nothing here writes to the portfolio database.
+    """
+    import asyncio
+
+    from portfolio.agent.client import DEFAULT_AUDIT_PATH, AgentResult, OpenCodeClient
+
+    async def _run() -> AgentResult | None:
+        client = OpenCodeClient(
+            base_url=base_url,
+            audit_path=None if no_audit else DEFAULT_AUDIT_PATH,
+        )
+        if not await client.health():
+            typer.echo(
+                f"ERROR: no opencode server at {base_url} - start one with `opencode serve`",
+                err=True,
+            )
+            return None
+        return await client.ask(
+            question, agent=agent_name, max_turns=max_turns, timeout_s=timeout
+        )
+
+    result = asyncio.run(_run())
+    if result is None:
+        raise typer.Exit(code=1)
+    if result.timed_out:
+        status = "TIMEOUT"
+    elif result.aborted:
+        status = "ABORTED (max-turns)"
+    elif result.error:
+        status = f"ERROR ({result.error[:120]})"
+    else:
+        status = "ok"
+    typer.echo(result.answer or "(no answer)")
+    call_summary = ", ".join(f"{c.tool}" for c in result.tool_calls) or "none"
+    typer.echo(
+        f"[ask] {status} | turns={result.turns} calls=[{call_summary}]"
+        f" elapsed={result.elapsed_s}s within_budget={result.within_budget}"
+    )
+    if not no_audit:
+        typer.echo(f"[ask] audit log -> {DEFAULT_AUDIT_PATH}")
 
 
 if __name__ == "__main__":

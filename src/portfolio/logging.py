@@ -24,6 +24,8 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
+from portfolio.config import DATA_DIR
+
 REDACTED = "[REDACTED]"
 
 # label(s) followed by an = or : and a quoted/unquoted value.
@@ -122,3 +124,26 @@ def setup_logging(
     # directly on that logger, while handler filters see every record it emits.
     handler.addFilter(redaction)
     root.addFilter(redaction)
+
+
+def redact_text(text: str) -> str:
+    """Mask secrets in an arbitrary string (the M7 answer-echo sweep, MAJOR-1b).
+
+    The logging handler filter only sees log RECORDS. Strings that never pass
+    through a handler - the Q&A agent's final answer and its audit-log fields -
+    need the same defensive masking applied directly. This reuses the exact
+    machinery the filter uses: literal token values from data/tokens.json, the
+    generic `label=value` secret regex, JWT-shaped three-dot segments, and long
+    base64-looking blobs. Nothing is ever added here that the filter wouldn't
+    already mask, so the two layers stay consistent by construction.
+    """
+    if not isinstance(text, str) or not text:
+        return text
+    secrets = _load_token_values(DATA_DIR / "tokens.json")
+    redactor = SecretRedactionFilter(secrets)
+    record = logging.LogRecord(
+        name="redact_text", level=logging.INFO,
+        pathname="", lineno=0, msg=text, args=(), exc_info=None,
+    )
+    redactor.filter(record)
+    return record.getMessage() if isinstance(record.msg, str) else text

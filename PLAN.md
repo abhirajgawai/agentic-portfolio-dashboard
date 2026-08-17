@@ -541,24 +541,48 @@ Tokens live in `data/tokens.json` (gitignored), never in the DB or snapshots.
   live Telegram delivery is the graceful-drop path until TELEGRAM_BOT_TOKEN/
   TELEGRAM_CHAT_ID are set (the "notifies" leg is pinned by test with a mock).
 
-### M7 — Q&A agent (3–4 evenings)
-1. `portfolio_data_mcp`: read-only tools over SQLite (`latest_snapshot`,
-   `holding_history`, `allocation_summary`, …).
-2. opencode project config: register the 4 MCP servers. Guardrails via the **`tools`
-   config** (not `permission` — that covers built-in tools only): globally disable
-   destructive MCP tools (`kite_place_order`, `kite_modify_order`, `kite_cancel_order`,
-   `*_gtt*`, any order tools on the other servers), and enable only the read-only
-   allowlist on the dedicated `portfolio-analyst` agent (§2b has the config shape).
-   Hosted Kite MCP already excludes destructive tools server-side; our custom wrappers
-   never register them at all. Moomoo OAuth is handled by opencode itself
-   (`opencode mcp auth moomoo`).
-3. Python client against `opencode serve`: create session → post question → stream SSE →
-   final text; enforce `maxTurns`/time budget client-side via the abort endpoint; log
-   every tool call for audit.
-4. Eval set: 10–15 canned questions incl. multi-hop ("total semiconductor exposure across
-   US + India?"); verify any non-allowlisted tool call is denied.
+### M7 — Q&A agent (3–4 evenings) ✅ DONE 2026-08-17 (gate: APPROVE with changes → APPROVE)
+1. **`portfolio_data_mcp/` (new, read-only FastMCP server):** 6 SELECT-only tools over
+   SQLite (`latest_snapshot`, `allocation_summary`, `holding_history`,
+   `portfolio_total`, `recent_runs`, `fired_alerts`), opened with `mode=ro`
+   (filesystem-level write lock — test-proven), bounded/validated inputs, never
+   accepts raw SQL, registers no write tools.
+2. **`.opencode/opencode.json` — the two-layer allowlist (guardrails #1 + #2):** MCP
+   servers `kite` (hosted), `moomoo` (hosted, OAuth stays a manual `opencode mcp auth
+   moomoo` step), `portfolio_data` (local). Global `tools` deny-by-default (`kite_*`,
+   `moomoo_*`, `portfolio_data_*` = false) + explicit belts for every destructive
+   pattern verified against the captured 88-tool Moomoo inventory (incl.
+   `moomoo_trading_order_*`, `moomoo_sim_trade_*`, `quote_modify_user_security`,
+   `*place*|*replace*|*cancel*|*modify*|*confirm*`). The `portfolio-analyst` agent
+   (steps 15, temp 0.2) re-enables ONLY `portfolio_data_*`, `kite_get_*`,
+   `moomoo_quote_*`, `moomoo_account_*` — **no filesystem/shell/web tools at all**
+   (the gate review's MAJOR: `read`/`grep`/`glob`/`list` could reach
+   `data/tokens.json`, so they are explicitly `false` and the answer is additionally
+   swept through `logging.redact_text()` before returning). `permission` covers
+   built-ins only — MCP control lives in `tools` (§2b).
+3. **`src/portfolio/agent/client.py` + `portfolio ask`:** async opencode-serve client —
+   POST /session → prompt_async → stream the global `/event` SSE bus filtered by
+   session → final answer from the message store; **budget enforced client-side**
+   (maxTurns counts tool parts, wall-clock timeout, both fire `POST /session/:id/abort`);
+   every tool call + redacted args/question appended to the gitignored
+   `data/logs/agent_audit.jsonl` (two-layer redaction: secret-label masking +
+   `redact_text()`), which is the eval's evidence.
+4. **`scripts/eval_agent.py` — 16 questions:** 9 data, 3 multi-hop, 1 exact-number
+   (ground truth computed from the DB; answer must match within 2% — q16 top-3 value
+   = ₹18,71,628.35), 2 refusal probes ("place a market order…", "show me my tokens"),
+   1 big listing; spawns/kills its own `opencode serve`, loads the allowlist from the
+   LIVE config, replays the durable audit file, fnmatch-asserts every executed tool.
 - ✅ Done when: eval questions answered within budget from CLI with zero non-allowlisted
-  tool executions.
+  tool executions. **Verification:** ruff clean; `uv run pytest` 154 passed / 2
+  skipped (13 M7 tests: read-only `mode=ro`, tool schemas, client budget/abort,
+  audit redaction incl. camelCase secret keys); eval **16/16 PASS within budget**,
+  tool-call audit 23 calls / 6 unique tools — all allowlisted (`portfolio_data_*` +
+  `kite_get_holdings` using the live authenticated daemon), **zero non-allowlisted**;
+  refusal probes → 0 tool calls; q16 exact-number matched. Review closure: filesystem
+  tools removed from the allowlist + answer redaction sweep + audit-question masking
+  + final tool-status capture (the audit records the FINAL status, not first-seen).
+  Known limit: `opencode serve` must be running for `portfolio ask` (the eval spawns
+  its own); M8's chat bridge is the first production consumer.
 
 ### M8 — Dashboard & UI design (2–3 evenings)
 

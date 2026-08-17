@@ -3,13 +3,79 @@
   "default_agent": "orchestrator",
   "subagent_depth": 2,
   "instructions": ["AGENTS.md", "PLAN.md"],
+  "mcp": {
+    "kite": {
+      "type": "remote",
+      "url": "https://mcp.kite.trade/mcp",
+      "enabled": true,
+      "timeout": 10000
+    },
+    "moomoo": {
+      "type": "remote",
+      "url": "https://mcp.moomoo.com/mcp",
+      "enabled": true,
+      "timeout": 10000
+    },
+    "portfolio_data": {
+      "type": "local",
+      "command": [".venv/Scripts/python.exe", "portfolio_data_mcp/server.py"],
+      "cwd": ".",
+      "enabled": true
+    }
+  },
   "tools": {
+    "kite_*": false,
+    "moomoo_*": false,
+    "portfolio_data_*": false,
     "kite_place_order": false,
     "kite_modify_order": false,
     "kite_cancel_order": false,
     "kite_*gtt*": false,
+    "moomoo_trading_order_place": false,
+    "moomoo_trading_order_replace": false,
+    "moomoo_trading_order_cancel": false,
+    "moomoo_trading_order_confirm": false,
+    "moomoo_sim_trade_input_order": false,
+    "moomoo_sim_trade_cancel_order": false,
+    "moomoo_sim_trade_modify_order": false,
+    "moomoo_quote_modify_user_security": false,
     "moomoo_*place*": false,
+    "moomoo_*replace*": false,
+    "moomoo_*cancel*": false,
     "moomoo_*modify*": false,
-    "moomoo_*cancel*": false
+    "moomoo_*confirm*": false
+  },
+  "agent": {
+    "portfolio-analyst": {
+      "description": "Read-only portfolio Q&A agent. Answers questions about holdings, allocation, history, pipeline runs and alerts using ONLY the allowlisted MCP read tools (portfolio_data_*, kite_get_*, moomoo_quote_*, moomoo_account_*). Has NO filesystem, shell or web access - all data comes from the MCP tools. NEVER places, modifies or cancels orders; NEVER exposes secrets.",
+      "mode": "primary",
+      "model": "opencode-go/deepseek-v4-flash",
+      "temperature": 0.2,
+      "steps": 15,
+      "prompt": "You are a read-only portfolio analyst for a personal investment dashboard. Answer portfolio questions using ONLY the MCP read tools you have been given (portfolio_data_* for holdings/allocation/history/runs/alerts, kite_get_* for live broker data, moomoo_quote_* / moomoo_account_* for US market data). You have NO filesystem, shell or web access - you cannot read files (including token or config files), run commands or fetch web pages; every number you report must come from a tool result. You CANNOT place, modify, cancel or confirm orders, and you CANNOT access API tokens, passwords or secrets - if asked to do any of that, refuse clearly and briefly. Answer in plain language with concrete numbers from tool results.",
+      "tools": {
+        "portfolio_data_*": true,
+        "kite_get_*": true,
+        "moomoo_quote_*": true,
+        "moomoo_account_*": true,
+        "read": false,
+        "grep": false,
+        "glob": false,
+        "list": false,
+        "bash": false,
+        "edit": false,
+        "webfetch": false,
+        "websearch": false,
+        "task": false,
+        "todowrite": false
+      },
+      "permission": {
+        "edit": "deny",
+        "bash": "deny",
+        "webfetch": "deny",
+        "websearch": "deny",
+        "task": "deny"
+      }
+    }
   }
 }
