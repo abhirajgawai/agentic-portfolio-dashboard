@@ -25,6 +25,7 @@ legs by construction, unlike the legacy portfolio_value writes.
 from __future__ import annotations
 
 import json
+import logging
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -33,9 +34,12 @@ from portfolio.db import connect
 from portfolio.returns import account_xirrs
 from portfolio.series import portfolio_series
 
+logger = logging.getLogger("portfolio.export_json")
+
 OUT = ROOT_DIR / "dashboard" / "public" / "data" / "latest.json"
 OUT_HISTORY = ROOT_DIR / "dashboard" / "public" / "data" / "history.json"
 OUT_XIRR = ROOT_DIR / "dashboard" / "public" / "data" / "xirr.json"
+OUT_ALERTS = ROOT_DIR / "dashboard" / "public" / "data" / "alerts.json"
 
 # Staleness thresholds (days) per platform: brokers refresh daily, CAS platforms
 # refresh on the monthly import cadence (M-4). Positions older than this mark the
@@ -243,6 +247,29 @@ def export(db_path: Path = DB_PATH, out: Path = OUT) -> Path:
         xirr_payload = {"asOf": now.isoformat(), "perAccount": per_account, "estimated": False}
         OUT_XIRR.parent.mkdir(parents=True, exist_ok=True)
         OUT_XIRR.write_text(json.dumps(xirr_payload, indent=2), encoding="utf-8")
+
+        # M6: evaluate rules -> alerts.json (the M8 dashboard contract) + the
+        # dedupe/Telegram delivery. ALERTS ARE OPTIONAL: a rules/config failure
+        # must never break the export (the scheduled chain's export is the
+        # 15:55 evaluation moment; a bad rule is a warning, not a lost export).
+        try:
+            from portfolio.alerts.engine import (
+                dedupe_and_send,
+                evaluate,
+                kolkata_date,
+                load_rules,
+                write_alerts_json,
+            )
+
+            # MINOR-1: the alert dedupe day is the Asia/Kolkata market date
+            # (kolkata_date), never the UTC date - the same `now` the export
+            # already injected for staleness/xirr.
+            today = kolkata_date(now)
+            fired = evaluate(conn, load_rules(), today=today, now_utc=now)
+            write_alerts_json(fired, now_utc=now, path=OUT_ALERTS)
+            dedupe_and_send(conn, fired, today=today, now_utc=now)
+        except Exception as exc:  # noqa: BLE001 - alerts optional
+            logger.warning("alert evaluation failed (export continues): %s", exc)
         return out
     finally:
         conn.close()
@@ -253,3 +280,4 @@ if __name__ == "__main__":
     print(f"exported -> {path}")
     print(f"exported -> {OUT_HISTORY}")
     print(f"exported -> {OUT_XIRR}")
+    print(f"exported -> {OUT_ALERTS}")

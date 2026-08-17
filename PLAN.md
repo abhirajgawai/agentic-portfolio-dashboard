@@ -505,13 +505,41 @@ Tokens live in `data/tokens.json` (gitignored), never in the DB or snapshots.
   the box was off Aug 15–17) — reported as `None`/`{}`, never fabricated; (2) the
   "charts render" half of the bar is M8 scope by design.
 
-### M6 — Alerts, rule-based only (1–2 evenings)
-- Declarative `rules.yaml`: daily drop > X%, target/stop cross, RSI/MA crossovers.
-  RSI/MA from accumulated snapshots or broker historical candles for day-one coverage.
-- Evaluate after each poll inside existing jobs; dedupe per (rule, trading day);
-  Telegram delivery; `--dry-run` mode.
-- **No AI judgment anywhere in this path** — explicit numeric conditions only.
+### M6 — Alerts, rule-based only (1–2 evenings) ✅ DONE 2026-08-17 (gate: APPROVE)
+- **`data/rules.yaml` (committed, structured data — NO eval/exec):** rules map to a
+  fixed metric catalog computed by the engine: `total_value_base`, `day_pnl_pct`
+  (day P&L → base via the same-rate_date FX contract as export_json — never
+  fabricated), `simple_return_pct`, `platform_stale` (days PAST the platform's own
+  threshold — brokers 2d, CAS 35d), `holding_return_pct` (cost-bearing holdings only;
+  M3 value-only rows skipped). Ops `lt|le|gt|ge`, severities info/warn/critical,
+  optional `target` to pin one item. Shipped rules: portfolio day drop < −5% (warn),
+  any holding < −25% from cost (warn), platform stale ≥ 2d past threshold (info).
+  RSI/MA crossover rules are a FUTURE extension (new metric in engine.py + a rule
+  line — the engine supports them structurally).
+- **`src/portfolio/alerts/engine.py`:** `load_rules` (lazy, missing/unparseable → []
+  + warning), `evaluate` (pure; naive datetimes refused; deterministic), 
+  `dedupe_and_send` (UNIQUE(rule_id, event_date) + ON CONFLICT DO NOTHING → one
+  alert per (rule, Kolkata day), ONE batched Telegram message per run via the M1
+  `send_telegram`, delivery failure logged and recorded anyway), `kolkata_date()`
+  (the event-date convention — the ledger's Asia/Kolkata date, never UTC), same-
+  rate_date FX pairing (the export_json load_fx contract).
+- **Wiring:** evaluated in `scripts/export_json.py` after xirr.json (failure-
+  tolerant; latest/history/xirr unchanged) → `dashboard/public/data/alerts.json`
+  `{generatedAt, alerts: [{ruleId, severity, message}]}`; `portfolio alerts`
+  CLI with `--dry-run` (prints would-be alerts, sends/writes nothing).
+- **No AI judgment anywhere** — explicit numeric conditions only (guardrail sweep:
+  no eval/exec/dynamic dispatch in alerts/).
 - ✅ Done when: a test rule fires on historical data and notifies exactly once.
+  **Verification:** ruff clean; `uv run pytest` 138 passed / 2 skipped (11 alert
+  tests: fire-once-then-same-day-dedupe, next-day refire, not-fire → nothing,
+  unconfigured-Telegram graceful, platform_stale metric, holding_return skips
+  costless rows, CLI dry-run vs default, malformed rules never crash, day_pnl_pct
+  FX conversion + missing-rate exclusion). **Live proof:** real-DB dry-run fires
+  2 genuine rules — `holding_deep_loss [KPITTECH] = −45.74%` and
+  `platform_stale_data [moomoo] = 8.00d` (the Aug 15–17 box-off gap); two export
+  runs → `alert_events` exactly 2 rows for the Kolkata date (dedupe proven). Note:
+  live Telegram delivery is the graceful-drop path until TELEGRAM_BOT_TOKEN/
+  TELEGRAM_CHAT_ID are set (the "notifies" leg is pinned by test with a mock).
 
 ### M7 — Q&A agent (3–4 evenings)
 1. `portfolio_data_mcp`: read-only tools over SQLite (`latest_snapshot`,

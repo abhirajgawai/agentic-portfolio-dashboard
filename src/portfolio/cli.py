@@ -505,5 +505,60 @@ def returns() -> None:
         conn.close()
 
 
+@app.command("alerts")
+def alerts(
+    dry_run: Annotated[bool, typer.Option(
+        "--dry-run", help="evaluate and print would-be alerts; send nothing, write nothing"
+    )] = False,
+) -> None:
+    """Evaluate M6 alert rules against the latest data.
+
+    Default: evaluate + dedupe (ONE Telegram message per (rule, day) - the
+    alert_events UNIQUE(rule_id, event_date) key) + write
+    dashboard/public/data/alerts.json (the same path the export writes). This
+    is the standalone entry point for a Task Scheduler wrapper later.
+
+    --dry-run is the VERIFICATION tool: prints would-be alerts against the
+    real DB, sends nothing, writes nothing. No gate (this is an evaluation
+    tool, not a broker-touching job); the injected clock is `_now_utc()`. The
+    dedupe day is the Asia/Kolkata market date (kolkata_date), never UTC.
+    """
+    from portfolio.db import connect
+    from portfolio.db.migrate import migrate
+
+    db_path = _db_path()
+    migrate(db_path)  # alert_events (0006) - idempotent, fresh-DB safety
+    conn = connect(db_path)
+    try:
+        from portfolio.alerts.engine import (
+            ALERTS_OUT,
+            dedupe_and_send,
+            evaluate,
+            kolkata_date,
+            load_rules,
+            write_alerts_json,
+        )
+
+        now = _now_utc()
+        today = kolkata_date(now)
+        rules = load_rules()
+        fired = evaluate(conn, rules, today=today, now_utc=now)
+        if dry_run:
+            if fired:
+                for alert in fired:
+                    typer.echo(f"would fire: [{alert['severity']}] {alert['message']}")
+            else:
+                typer.echo(f"dry-run: {len(rules)} rules evaluated, none fired")
+            return
+        new_events = dedupe_and_send(conn, fired, today=today, now_utc=now)
+        write_alerts_json(fired, now_utc=now, path=ALERTS_OUT)
+        typer.echo(
+            f"alerts: {len(fired)} fired, {len(new_events)} new sent"
+            f" (alerts.json -> {ALERTS_OUT})"
+        )
+    finally:
+        conn.close()
+
+
 if __name__ == "__main__":
     app()

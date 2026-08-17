@@ -1,0 +1,63 @@
+# M6 rule-based alerts - STRUCTURED DATA, explicit numeric conditions only.
+#
+# No eval/exec anywhere: each rule maps to a fixed metric computed by
+# src/portfolio/alerts/engine.py from the DB. Rules are deterministic and
+# static - edit this file, restart the run, done.
+#
+# Schema (per rule):
+#   id         unique rule id (the alert_events dedupe key, per (id, day))
+#   name       human-readable name for the Telegram message
+#   type       fixed: portfolio (the only type in M6)
+#   metric     one of:
+#                total_value_base   -> latest snapshot portfolio total (INR base)
+#                day_pnl_pct        -> today's day P&L as % of the latest total
+#                simple_return_pct  -> portfolio simple return % (cost basis where
+#                                      it exists)
+#                platform_stale     -> days a platform is PAST its own staleness
+#                                      threshold (brokers 2d, CAS 35d; mirrors
+#                                      export_json's per-platform stale flags)
+#                holding_return_pct -> per-holding return % (only holdings with a
+#                                      cost basis - the M3 CAS value-only rows are
+#                                      skipped)
+#   op         lt | le | gt | ge (against `threshold`)
+#   threshold  the numeric comparison bound (same unit as the metric)
+#   severity   info | warn | critical
+#   target     OPTIONAL: for per-item metrics (platform_stale -> platform name,
+#              holding_return_pct -> ticker), restrict to ONE item. Without it,
+#              the rule fires if ANY item matches and the message names the
+#              worst offender.
+#
+# This file must never contain credentials - the Telegram token stays in the
+# environment (TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID, guardrail #2).
+
+rules:
+  - id: portfolio_day_drop
+    name: Portfolio day drop
+    type: portfolio
+    metric: day_pnl_pct
+    op: lt
+    threshold: -5.0
+    severity: warn
+    # A single bad session: the day's P&L fell more than 5% of the portfolio.
+
+  - id: holding_deep_loss
+    name: Holding deep loss
+    type: portfolio
+    metric: holding_return_pct
+    op: lt
+    threshold: -25.0
+    severity: warn
+    # Any holding with a cost basis is down more than 25% from it. Holdings
+    # without cost (M3 CAS demat MFs / Sharekhan equities) are skipped.
+
+  - id: platform_stale_data
+    name: Platform data stale
+    type: portfolio
+    metric: platform_stale
+    op: ge
+    threshold: 2.0
+    severity: info
+    # A platform's newest position is 2+ days past ITS OWN staleness threshold
+    # (brokers 2 days -> 4+ days old; CAS platforms 35 days -> 37+ days old).
+    # This is the informational sibling of the M1 session-expiry warning: it
+    # covers the same ground at evaluation time (export), not capture time.
