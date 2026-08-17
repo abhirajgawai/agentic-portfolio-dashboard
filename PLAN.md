@@ -584,48 +584,59 @@ Tokens live in `data/tokens.json` (gitignored), never in the DB or snapshots.
   Known limit: `opencode serve` must be running for `portfolio ask` (the eval spawns
   its own); M8's chat bridge is the first production consumer.
 
-### M8 — Dashboard & UI design (2–3 evenings)
-
-**How MCP data reaches the UI** — two paths, deliberately separate:
-1. **Dashboard (deterministic, no LLM):** renders the latest snapshot. Each pipeline run
-   ends with `scripts/export_json.py` regenerating static JSON the UI fetches. A
-   **"Refresh now"** button calls a small local FastAPI bridge that triggers an on-demand
-   pipeline run (MCP pulls → normalize → SQLite → re-export JSON) and returns when done —
-   this is how *live* MCP portfolio data reaches the UI. Freshness = last run, always
-   shown as an "as of 15:45 IST, 06 Aug" label + a staleness badge if the last EOD run
-   is missing.
-2. **Chat panel (agentic):** wired to the Phase 5 agent for ad-hoc questions; the agent
-   can pull live MCP data on demand, but the dashboard never depends on it.
-
-**JSON contract** (generated artifacts in `dashboard/public/data/`):
-```
-latest.json    → { asOf, baseCurrency, fx: {USDINR, SGDINR},
-                   totals: { valueBase, dayPnl, totalReturnPct },
-                   byGeography, byPlatform, bySector, byAssetClass,   // allocation sums
-                   holdings: [ { platform, geography, ticker, name, qty, avgPrice, ltp,
-                                 value, valueBase, dayChangePct, returnPct, sector } ] }
-history.json   → { dates[], portfolioValueBase[], byGeography: {IN[], US[]},
-                   perHolding: { ticker: { dates[], value[], returnPct[] } } }
-alerts.json    → rules + fired events (Phase 4)
-```
-
-**Screens** (Vite + React + recharts, tab layout):
-1. **Overview (consolidated):** header cards — total value (INR base), day P&L, total
-   return %, XIRR (Phase 3). Donuts: geography (IN vs US), platform (3 brokers), sector
-   (cross-market — this is where e.g. semiconductor exposure across US + India becomes
-   visible), asset class. Line chart: portfolio value trend from EOD snapshots.
-2. **India view:** everything in INR — holdings table (ticker, name, platform badge, qty,
-   avg price, LTP, value, day %, return %) + allocation by sector and by stock; filter by
-   platform (Zerodha/Groww).
-3. **US view:** same layout in USD (Moomoo holdings).
-4. **Returns:** per-holding return bar chart, portfolio trend line, XIRR/CAGR cards.
-5. **Alerts:** rule list with enable toggles + fired-events log.
-6. **Chat drawer:** persistent right-side panel → agent bridge.
-
-**Post-deployment (M9):** same contract, but JSON comes from Supabase (dashboard queries
-it directly or via an edge function); Refresh-now becomes a serverless function trigger.
+### M8 — Dashboard & UI design (2–3 evenings) ✅ DONE 2026-08-17 (gate: APPROVE)
+- **Stack (user-approved after research — `docs/DASHBOARD_PLAN.md`):** Vite 8 + React 19
+  SPA, TypeScript strict, Tailwind v4 + **shadcn/ui v4** (dark, Linear/Vercel
+  aesthetic), **Apache ECharts** via `echarts/core` modular imports (donuts, area/line,
+  bars — dual-axis/dataZoom/candles-ready for future price charts), TanStack Query +
+  TanStack Table v8 + **Zod v4**. NOT the original recharts sketch — recharts lacks
+  zoom/dual-axis/candlesticks. No Next.js: it would add a JS server that only proxies
+  into the Python pipeline (research rationale in the plan doc).
+- **Two paths, deliberately separate (deterministic boundary):**
+  1. **Dashboard (deterministic, no LLM):** renders the four JSON exports
+     (`dashboard/public/data/{latest,history,xirr,alerts}.json`) through **Zod schemas
+     = THE contract** (one typed client; `npm run check:contract` validates the real
+     files). A **"Refresh now"** button → `POST /api/refresh` on the bridge → the real
+     pipeline CLI (`snapshot --platform all --force` + `export_json.py`) → JSONs
+     regenerated → TanStack Query invalidates → UI updates. Freshness: "as of" label +
+     per-platform stale badges.
+  2. **Chat panel (agentic):** right drawer → `POST /api/ask` → M7 client → answer +
+     tool-call chips + honest "agent offline" state; the dashboard never depends on it.
+- **`src/portfolio/bridge.py`** (FastAPI, loopback-only, CORS for the Vite origin):
+  `GET /api/health` · `POST /api/refresh` ({ok, summary} | clean 502) · `POST /api/ask`
+  ({answer, toolCalls, turns, withinBudget} | clean 503 when opencode serve is down).
+  Never touches broker MCPs or the DB directly — shells out to the real CLI. `fastapi` +
+  `uvicorn` added as dev deps.
+- **Screens** (6 tabs): Overview (cards: total value / day P&L / simple return with cost
+  coverage / XIRR; 4 ECharts donuts geography/platform/sector/asset-class; value-over-
+  time area chart; staleness badges; alerts chip) · India view (INR holdings table,
+  platform filter zerodha/groww/sharekhan) · US view (moomoo, display currency) ·
+  Returns (per-holding return bars cost-bearing-only, trend, XIRR cards with honest
+  "no captured trades yet") · Alerts (severity-colored fired log, empty state) · Chat
+  drawer. Loading/error/offline/empty states everywhere; dark theme; ₹-formatted.
+- **JSON contract** (generated in `dashboard/public/data/`; `latest.json` ~22-key
+  holdings incl. `valueDisplay`/`displayCurrency`/`returnPct`/`dayPnl`; `history.json`
+  = `dates[]/portfolioValueBase[]/byGeography{IN[],US[]}/byPlatform{…}` — **byPlatform,
+  NOT perHolding** (G8 doc-drift corrected 2026-08-17); `xirr.json` perAccount;
+  `alerts.json` fired events).
+- **Post-deployment (M9):** same Zod contract; the data client re-points at PostgREST
+  views returning the identical shapes (base-URL + `/data/` prefix change); refresh
+  becomes an Edge Function; ask becomes serverless. RLS maps to guardrail #1.
 - ✅ Done when: local dashboard shows today's snapshot across all three views; Refresh-now
-  pulls live MCP data and updates the UI; chat answers end-to-end.
+  pulls live MCP data and updates the UI; chat answers end-to-end. **Verification:**
+  `npm run build` green (app 155KB + echarts 620KB split chunk — tree-shaking proven);
+  `npm run typecheck` + `npm run lint` clean; `npm run check:contract` parses the real
+  exports (68 holdings, allocSum 100.00%); `uv run ruff check .` + `uv run pytest`
+  154/2 (baseline unchanged); live `POST /api/refresh` pulled zerodha 35 + moomoo 6 and
+  regenerated all 4 JSONs; `POST /api/ask` answered real questions (largest holding SMH
+  ₹17.1L, top-5 table) via allowlisted `portfolio_data_*` tools, within budget; server
+  down → clean 503; `.opencode/opencode.json` allowlist untouched. **Review closure:**
+  refresh 502 payload vs schema mismatch fixed (error now a readable serialized
+  summary); `asOf` nullable on fresh install; docs corrected to `byPlatform` truth;
+  dead `formatDate` removed; no-op `theme="dark"` prop dropped. **Carryover (tracked,
+  M8.5/M9):** a11y polish (keyboard-sortable table headers, `aria-pressed` filters),
+  StatusBar stale tooltip wording, HoldingsTable accessor naming, Host-header belt on
+  the bridge, chat tool-chip final-status display.
 
 ### M9 — Deployment (2–3 evenings)
 - Migrate SQLite → Supabase (schema ports 1:1) — the shared spine: local legs and cloud
