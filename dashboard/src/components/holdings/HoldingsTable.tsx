@@ -144,10 +144,10 @@ export function HoldingsTable({
   return (
     <Card className="overflow-hidden">
       <div className="flex items-center justify-between border-b px-3 py-2">
-        <span className="text-xs text-muted-foreground">
+        <span className="min-w-0 truncate text-xs text-muted-foreground">
           {rows.length} holding{rows.length === 1 ? '' : 's'}
         </span>
-        <div className="relative w-56">
+        <div className="relative w-full sm:w-56">
           <Search className="absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
             value={search}
@@ -203,7 +203,7 @@ export function HoldingsTable({
             ) : (
               rows.map((row) => (
                 <tr
-                  key={`${row.original.platform}:${row.original.ticker}`}
+                  key={`${row.original.platform}:${row.original.ticker}:${row.id}`}
                   className="border-b border-border/50 transition-colors last:border-0 hover:bg-accent/40"
                 >
                   {row.getVisibleCells().map((cell) => (

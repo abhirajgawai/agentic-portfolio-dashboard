@@ -30,28 +30,34 @@ export function AppShell() {
 
   return (
     <div className="flex h-screen flex-col bg-background">
-      {/* Top bar: brand + tab navigation */}
-      <header className="flex h-12 shrink-0 items-center gap-4 border-b px-4">
-        <div className="flex items-center gap-2">
+      {/* Top bar: brand + tab navigation. On <=sm the tab labels hide (icons
+          stay) and the tabs region scrolls horizontally instead of clipping
+          (min-w-0 lets it shrink inside the flex row; overflow-x-auto is the
+          belt). Labels return at sm+ via `hidden sm:inline`. */}
+      <header className="flex h-12 shrink-0 items-center gap-2 border-b px-4 sm:gap-4">
+        <div className="flex shrink-0 items-center gap-2">
           <div className="flex size-6 items-center justify-center rounded-md bg-primary/15">
             <Activity className="size-3.5 text-primary" />
           </div>
-          <span className="text-sm font-semibold tracking-tight">Portfolio</span>
+          <span className="hidden text-sm font-semibold tracking-tight sm:inline">Portfolio</span>
         </div>
 
-        <Tabs value={tab} onValueChange={(v) => setTab(v as TabId)} className="ml-2">
-          <TabsList className="h-8 bg-transparent p-0">
-            {TABS.map((t) => (
-              <TabsTrigger
-                key={t.id}
-                value={t.id}
-                className="gap-1.5 px-3 text-xs data-[state=active]:bg-muted data-[state=active]:shadow-none"
-              >
-                <t.icon className="size-3.5" />
-                {t.label}
-              </TabsTrigger>
-            ))}
-          </TabsList>
+        <Tabs value={tab} onValueChange={(v) => setTab(v as TabId)} className="ml-1 min-w-0 flex-1 sm:ml-2">
+          <div className="overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <TabsList className="h-8 w-max bg-transparent p-0">
+              {TABS.map((t) => (
+                <TabsTrigger
+                  key={t.id}
+                  value={t.id}
+                  aria-label={t.label}
+                  className="gap-1.5 px-2 sm:px-3 data-[state=active]:bg-muted data-[state=active]:shadow-none"
+                >
+                  <t.icon className="size-3.5" />
+                  <span className="hidden sm:inline">{t.label}</span>
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </div>
         </Tabs>
 
         <div className="ml-auto flex items-center gap-3">

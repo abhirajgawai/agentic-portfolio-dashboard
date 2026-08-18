@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:stack": "concurrently -n serve,bridge,web -c green,blue,cyan \"opencode serve --port 4096\" \"uv run python -m portfolio.bridge\" \"vite\"",
     "build": "tsc -b && vite build",
     "typecheck": "tsc -b --noEmit",
     "lint": "oxlint",
@@ -22,7 +23,6 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "echarts": "^6.0.0",
-    "echarts-for-react": "^3.0.5",
     "lucide-react": "^0.545.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
@@ -30,6 +30,7 @@
     "zod": "^4.2.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@tailwindcss/vite": "^4.1.17",
     "@types/node": "^24.13.3",
     "@types/react": "^19.2.17",
@@ -39,6 +40,7 @@
     "tailwindcss": "^4.1.17",
     "tsx": "^4.21.0",
     "typescript": "~6.0.2",
-    "vite": "^8.2.0"
+    "vite": "^8.2.0",
+    "concurrently": "^9.1.0"
   }
 }

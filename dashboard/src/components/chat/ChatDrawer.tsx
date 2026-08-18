@@ -99,7 +99,7 @@ export function ChatDrawer({
   }
 
   return (
-    <aside className="flex w-full shrink-0 flex-col border-l bg-card sm:w-[400px]">
+    <aside className="fixed inset-y-0 right-0 z-50 flex w-full flex-col bg-card sm:static sm:w-[400px] sm:shrink-0 sm:border-l">
       {/* Header */}
       <div className="flex items-center justify-between border-b px-4 py-3">
         <div className="flex items-center gap-2">

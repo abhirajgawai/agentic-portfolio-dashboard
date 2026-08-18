@@ -74,7 +74,7 @@ export function AlertsScreen() {
   return (
     <div className="space-y-3">
       <Card>
-        <CardHeader className="flex-row items-center justify-between pb-1">
+        <CardHeader className="flex-col gap-2 pb-1 sm:flex-row sm:items-center sm:justify-between">
           <CardTitle className="text-xs text-muted-foreground">
             Fired alerts · evaluated {formatAsOfLong(alerts.data.generatedAt)}
           </CardTitle>

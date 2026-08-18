@@ -19,6 +19,7 @@ import {
 } from '@/components/ui/tooltip'
 import { Spinner } from '@/components/layout/states'
 import { useRefresh } from '@/lib/useRefresh'
+import { useBackendHealth, type BackendStatus } from '@/lib/useBackendHealth'
 import { formatAsOfLong, platformLabel } from '@/lib/format'
 import type { Latest, Alerts } from '@/types/contract'
 import { cn } from '@/lib/utils'
@@ -55,6 +56,21 @@ export function StatusBar({
 
   const refreshing = state.status === 'running'
 
+  // Backend liveness: bridge + opencode serve. Polls /api/health (see hook).
+  const backend = useBackendHealth()
+  const backendLabel: Record<BackendStatus, string> = {
+    loading: 'Connecting…',
+    online: 'Agent online',
+    'agent-offline': 'Agent offline',
+    'backend-offline': 'Backend offline',
+  }
+  const backendDot: Record<BackendStatus, string> = {
+    loading: 'bg-muted-foreground',
+    online: 'bg-gain',
+    'agent-offline': 'bg-warning',
+    'backend-offline': 'bg-loss',
+  }
+
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b px-4 py-2 text-xs">
       <span className="text-muted-foreground">
@@ -90,6 +106,23 @@ export function StatusBar({
       )}
 
       <div className="ml-auto flex items-center gap-2">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="flex items-center gap-1.5 text-muted-foreground">
+              <span className={cn('size-2 rounded-full', backendDot[backend])} />
+              {backendLabel[backend]}
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>
+            {backend === 'backend-offline'
+              ? 'Backend bridge (127.0.0.1:8000) is down — start the stack with `npm run dev:stack`.'
+              : backend === 'agent-offline'
+                ? 'opencode serve is down — start it with `opencode serve --port 4096`.'
+                : backend === 'online'
+                  ? 'Agent runtime (opencode serve) is reachable.'
+                  : 'Checking backend status…'}
+          </TooltipContent>
+        </Tooltip>
         {state.status === 'error' && flash === 'error' && (
           <span className="max-w-60 truncate text-loss">Refresh failed: {state.detail}</span>
         )}
