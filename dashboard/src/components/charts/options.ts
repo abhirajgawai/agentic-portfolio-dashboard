@@ -31,6 +31,16 @@ export type NameValue = { name: string; value: number }
 
 const baseTextStyle = { color: CHART_TEXT, fontFamily: 'inherit' }
 
+/**
+ * Legend-label cap for donuts with many slices (sector has 24 items). Long
+ * names are ellipsized so more items fit per legend page; the pie tooltip
+ * still shows the full name on hover.
+ */
+const LEGEND_MAX_CHARS = 14
+function truncateLegend(name: string): string {
+  return name.length > LEGEND_MAX_CHARS ? `${name.slice(0, LEGEND_MAX_CHARS - 1)}…` : name
+}
+
 /** Donut (pie with a center hole) — used for all four allocation dimensions. */
 export function donutOption(
   data: NameValue[],
@@ -52,21 +62,23 @@ export function donutOption(
     },
     legend: {
       type: 'scroll',
-      orient: 'vertical',
-      right: 4,
-      top: 'middle',
+      orient: 'horizontal',
+      bottom: 0,
+      left: 'center',
+      width: '92%',
       itemWidth: 10,
       itemHeight: 10,
       icon: 'circle',
       textStyle: { color: CHART_TEXT, fontSize: 11 },
       pageTextStyle: { color: CHART_TEXT },
+      formatter: (name: string) => truncateLegend(name),
     },
     series: [
       {
         name: 'Allocation',
         type: 'pie',
-        radius: ['55%', '78%'],
-        center: ['35%', '50%'],
+        radius: ['54%', '76%'],
+        center: ['50%', '42%'],
         avoidLabelOverlap: true,
         itemStyle: { borderColor: 'rgba(10,10,12,0.9)', borderWidth: 2 },
         label: { show: false },
@@ -79,8 +91,8 @@ export function donutOption(
         ? [
             {
               type: 'text',
-              left: '35%',
-              top: '44%',
+              left: '50%',
+              top: '34%',
               style: {
                 text: opts.centerLabel ?? '',
                 fill: '#e8e8ea',
@@ -91,8 +103,8 @@ export function donutOption(
             },
             {
               type: 'text',
-              left: '35%',
-              top: '56%',
+              left: '50%',
+              top: '46%',
               style: {
                 text: opts.centerSub ?? '',
                 fill: CHART_TEXT,
