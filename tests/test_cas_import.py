@@ -13,6 +13,7 @@ from portfolio.cas_import import (
     statement_end_date,
 )
 from portfolio.db.migrate import migrate
+from portfolio.normalize.sectors import load_sectors
 
 FIXTURE = Path(__file__).parent.parent / "samples" / "cas" / "cas_june2026_scrubbed.json"
 CAS_PDF = Path(__file__).parent.parent / "data" / "cas" / "CAS-June2026.pdf"
@@ -70,6 +71,38 @@ def test_extract_holdings_field_mapping():
     assert bfin.current_price == pytest.approx(1004.75)
     assert bfin.cost_basis is None
     assert "#" not in (bfin.name or "")
+
+
+def test_extract_holdings_curated_sectors():
+    """CAS rows take sector/asset_class from the curated map — ISIN-keyed for
+    MFs (the demat-MF ticker IS the ISIN), symbol-keyed for equities. Guards
+    the ISIN data-shape contract end to end (fixture + real sectors.csv)."""
+    groups, _ = extract_holdings(_fixture(), sectors=load_sectors())
+    folio = next(v for (p, r), v in groups.items() if r == "folio")
+    demat = next(v for (p, r), v in groups.items() if p == "groww" and r != "folio")
+    sharekhan = next(v for (p, r), v in groups.items() if p == "sharekhan")
+
+    # (a) ISIN-keyed MF rows get their AMFI/Groww fund category.
+    ppfas = next(h for h in folio if h.ticker == "INF879O01027")
+    assert ppfas.sector == "Flexi Cap"
+    assert ppfas.asset_class == "mutual_fund"
+    gold = next(h for h in demat if h.ticker == "INF204KB17I5")
+    assert gold.sector == "Gold"
+    assert gold.asset_class == "etf"  # CSV wins over the name-derived guess
+
+    # (b) Sharekhan equities get their sector by symbol.
+    assert next(h for h in sharekhan if h.ticker == "BAJFINANCE").sector == "Financial Services"
+    assert next(h for h in sharekhan if h.ticker == "RELAXO").sector == "Consumer"
+
+    # (c) Keying is exact: an ISIN map never leaks onto an equity row (or vice
+    # versa) — a row absent from the map keeps sector None, never "unknown".
+    hand = {"INF879O01027": ("Flexi Cap", "mutual_fund"), "RELAXO": ("Consumer", "equity")}
+    groups2, _ = extract_holdings(_fixture(), sectors=hand)
+    demat2 = next(v for (p, r), v in groups2.items() if p == "groww" and r != "folio")
+    sharekhan2 = next(v for (p, r), v in groups2.items() if p == "sharekhan")
+    assert next(h for h in demat2 if h.ticker == "INF846K01K35").sector is None
+    assert next(h for h in sharekhan2 if h.ticker == "BAJFINANCE").sector is None
+    assert next(h for h in demat2 if h.ticker == "INF879O01027").sector == "Flexi Cap"
 
 
 @pytest.fixture()

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Activity, ChartLine, LayoutDashboard, MessageSquare, Landmark, Globe2, Bell } from 'lucide-react'
+import { Activity, Bell, ChartLine, Eye, EyeOff, Globe2, Landmark, LayoutDashboard, MessageSquare } from 'lucide-react'
 
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { StatusBar } from '@/components/layout/StatusBar'
@@ -10,6 +10,7 @@ import { ReturnsScreen } from '@/components/returns/ReturnsScreen'
 import { AlertsScreen } from '@/components/alerts/AlertsScreen'
 import { ChatDrawer } from '@/components/chat/ChatDrawer'
 import { useAlerts, useLatest } from '@/lib/data'
+import { usePrivacy } from '@/lib/privacy'
 import { cn } from '@/lib/utils'
 
 type TabId = 'overview' | 'india' | 'us' | 'returns' | 'alerts'
@@ -27,6 +28,7 @@ export function AppShell() {
   const [chatOpen, setChatOpen] = useState(false)
   const latestQuery = useLatest()
   const alertsQuery = useAlerts()
+  const { masked, toggleMasked } = usePrivacy()
 
   return (
     <div className="flex h-screen flex-col bg-background">
@@ -79,6 +81,23 @@ export function AppShell() {
           >
             <MessageSquare className="size-3.5" />
             Chat
+          </button>
+          {/* Privacy toggle — hides amounts + quantities behind MASK_TEXT.
+              Percentages and counts stay visible (they reveal no net worth). */}
+          <button
+            type="button"
+            onClick={toggleMasked}
+            className={cn(
+              'inline-flex items-center rounded-md px-2 py-1.5 transition-colors',
+              masked
+                ? 'bg-secondary text-secondary-foreground'
+                : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground',
+            )}
+            aria-pressed={masked}
+            aria-label={masked ? 'Show amounts' : 'Hide amounts'}
+            title={masked ? 'Show amounts' : 'Hide amounts'}
+          >
+            {masked ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
           </button>
         </div>
       </header>

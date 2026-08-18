@@ -63,6 +63,7 @@ from portfolio.fx import get_fx_rates
 from portfolio.normalize.allocation import DIMENSIONS, compute_allocation
 from portfolio.normalize.moomoo import normalize_holdings as normalize_moomoo
 from portfolio.normalize.schema import Holding
+from portfolio.normalize.sectors import load_sectors
 from portfolio.normalize.zerodha import normalize_holdings as normalize_zerodha
 from portfolio.serve import DEFAULT_PORT
 
@@ -267,7 +268,7 @@ def _snapshot_zerodha(
         # must leave an audited `runs` error row and surface as SessionNotReady
         # - never a raw traceback that kills `--all`'s remaining legs.
         try:
-            holdings = normalize_zerodha(payload, sectors=_load_sectors())
+            holdings = normalize_zerodha(payload, sectors=load_sectors())
         except Exception as exc:  # noqa: BLE001 - audit, then re-raise
             _audit_failure(str(exc))
             raise SessionNotReady(f"zerodha snapshot failed: {exc}") from exc
@@ -377,7 +378,7 @@ async def _collect_moomoo() -> tuple[list[Holding], str | None]:
             payload = pos_res.json()
             if payload is None:
                 raise SessionNotReady("moomoo positions returned no parseable payload")
-            holdings = normalize_moomoo(payload, sectors=_load_sectors())
+            holdings = normalize_moomoo(payload, sectors=load_sectors())
             return holdings, acc_id
     except SessionNotReady:
         raise
@@ -523,25 +524,6 @@ def _attach_parsed(data: dict[str, Any]) -> None:
         if parsed is not None:
             break
     data["parse"] = parsed
-
-
-def _load_sectors() -> dict[str, tuple[str | None, str | None]]:
-    """Load data/sectors.csv {ticker -> (sector, asset_class)} if present."""
-    csv_path = Path(__file__).parent.parent.parent / "data" / "sectors.csv"
-    if not csv_path.exists():
-        return {}
-    import csv as _csv
-
-    lookup: dict[str, tuple[str | None, str | None]] = {}
-    with csv_path.open(newline="", encoding="utf-8") as fh:
-        # Comment lines (leading '#') are skipped BEFORE DictReader so they can
-        # never become junk lookup entries (MINOR-4).
-        data_lines = (ln for ln in fh if not ln.lstrip().startswith("#"))
-        for row in _csv.DictReader(data_lines):
-            ticker = (row.get("ticker") or "").strip()
-            if ticker:
-                lookup[ticker] = (row.get("sector") or None, row.get("asset_class") or None)
-    return lookup
 
 
 def _db_connection(db_path: Path):

@@ -2,17 +2,22 @@
  * Generic holdings table (TanStack Table v8) — used by the India and US views.
  * Sorting + text search + empty states. All values come from the contract;
  * `valueField` picks valueBase (INR legs) or valueDisplay (moomoo SGD leg).
+ *
+ * Memoized with React.memo to prevent re-creating the table instance when
+ * parent re-renders with the same holdings data. The table instance is
+ * stabilized via useMemo — it only recreates when columns or data identity changes.
  */
 
 import { flexRender, getCoreRowModel, getFilteredRowModel, getSortedRowModel, useReactTable, createColumnHelper } from '@tanstack/react-table'
 import { ArrowDown, ArrowUp, ChevronsUpDown, Search } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useMemo, useState, memo } from 'react'
 
 import { Badge } from '@/components/ui/badge'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { EmptyState } from '@/components/layout/states'
-import { formatMoney, formatPct, formatPrice, formatQty, platformLabel } from '@/lib/format'
+import { formatMoney, formatPct, formatPrice, formatQty, MASK_TEXT, platformLabel } from '@/lib/format'
+import { usePrivacy } from '@/lib/privacy'
 import type { Holding } from '@/types/contract'
 import { cn } from '@/lib/utils'
 
@@ -24,18 +29,21 @@ function PctCell({ value, align = 'right' }: { value: number | null; align?: 'ri
   return <span className={cn('tabular-nums', cls, align === 'right' ? 'text-right' : '')}>{formatPct(value)}</span>
 }
 
-export function HoldingsTable({
-  holdings,
-  displayCurrency,
-  platformVisible = true,
-}: {
-  holdings: readonly Holding[]
+interface HoldingsTableProps {
+  holdings: Holding[]
   displayCurrency: string
   /** Show the platform column (India has 3 platforms, US only moomoo). */
   platformVisible?: boolean
-}) {
+}
+
+const HoldingsTableInner = memo(function HoldingsTableInner({
+  holdings,
+  displayCurrency,
+  platformVisible = true,
+}: HoldingsTableProps) {
   const [sorting, setSorting] = useState([{ id: 'value', desc: true }])
   const [search, setSearch] = useState('')
+  const { masked } = usePrivacy()
 
   const columns = useMemo(
     () => [
@@ -63,7 +71,9 @@ export function HoldingsTable({
         : []),
       columnHelper.accessor('qty', {
         header: 'Qty',
-        cell: (info) => <span className="tabular-nums">{formatQty(info.getValue())}</span>,
+        cell: (info) => (
+          <span className="tabular-nums">{masked ? MASK_TEXT : formatQty(info.getValue())}</span>
+        ),
       }),
       columnHelper.accessor('avgPrice', {
         header: 'Avg price',
@@ -71,19 +81,21 @@ export function HoldingsTable({
           info.getValue() === null ? (
             <span className="text-muted-foreground">—</span>
           ) : (
-            <span className="tabular-nums">{formatPrice(info.getValue() as number)}</span>
+            <span className="tabular-nums">{masked ? MASK_TEXT : formatPrice(info.getValue() as number)}</span>
           ),
       }),
       columnHelper.accessor('ltp', {
         header: 'LTP',
-        cell: (info) => <span className="tabular-nums">{formatPrice(info.getValue())}</span>,
+        cell: (info) => (
+          <span className="tabular-nums">{masked ? MASK_TEXT : formatPrice(info.getValue())}</span>
+        ),
       }),
       columnHelper.accessor('valueBase', {
         id: 'value',
         header: () => `Value (${displayCurrency})`,
         cell: (info) => (
           <span className="font-medium tabular-nums">
-            {formatMoney(info.row.original.valueDisplay, displayCurrency)}
+            {masked ? MASK_TEXT : formatMoney(info.row.original.valueDisplay, displayCurrency)}
           </span>
         ),
         sortingFn: (a, b) => a.original.valueDisplay - b.original.valueDisplay,
@@ -107,11 +119,14 @@ export function HoldingsTable({
         },
       }),
     ],
-    [displayCurrency, platformVisible],
+    [displayCurrency, masked, platformVisible],
   )
 
+  // Stable data reference — only recreate when holdings array content changes
+  const stableData = useMemo(() => holdings, [holdings])
+
   const table = useReactTable({
-    data: [...holdings],
+    data: stableData,
     columns,
     state: { sorting, globalFilter: search },
     onSortingChange: setSorting,
@@ -219,4 +234,8 @@ export function HoldingsTable({
       </div>
     </Card>
   )
-}
+})
+
+HoldingsTableInner.displayName = 'HoldingsTable'
+
+export const HoldingsTable = HoldingsTableInner

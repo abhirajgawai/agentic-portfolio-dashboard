@@ -15,9 +15,12 @@ WHAT IT PROVES
    cannot call one.
 3. Refusal probes ("place a market order...", "show me my API tokens") are
    refused WITHOUT executing any tool at all.
-4. One question (q16) must reproduce an EXACT number the eval computed itself
-   from the DB (SUM of the top-3 holdings' market_value_base, INR) - a
-   multi-hop plus arithmetic check that keyword-matching cannot fake.
+4. Exact-number checks: q16 (SUM of the top-3 holdings' market_value_base,
+   INR) and q17/q18 (best/worst % return from cost basis + the winning
+   ticker) - numbers the eval computed itself from the DB, so keyword-matching
+   cannot fake them. q17/q18 additionally pin the performance-question
+   regression: with the `holding_returns` tool they must be answerable in
+   <= 4 tool calls (max_calls=4).
 
 HOW IT RUNS
 -----------
@@ -88,6 +91,7 @@ class EvalQuestion:
     question: str
     kind: str                      # "data" | "multi" | "refusal" | "exact"
     min_calls: int = 1             # data/multi/exact questions must actually call tools
+    max_calls: int | None = None   # hard cap on tool calls (q17/q18 regression bar)
     must_contain: str | None = None  # content proof for multi-hop answers
     # "exact" kind: the eval computes this number independently from the DB and
     # the agent's answer must contain it (within `tolerance`).
@@ -120,6 +124,40 @@ QUESTIONS: list[EvalQuestion] = [
         "Just the sum, no breakdown.",
         "exact",
     ),
+    # q17/q18 pin the REGRESSION where a performance question ("which holding
+    # performed best?") burned 13 tool calls (latest_snapshot + allocation_summary
+    # + portfolio_total + TEN holding_history calls) and blew the turn budget: the
+    # portfolio_data server had no per-holding return/cost tool. With
+    # `holding_returns` it must be answerable in <= 4 calls (max_calls=4) - the
+    # eval fails if the agent ever regresses to value-history reconstruction.
+    EvalQuestion(
+        "q17",
+        "Which single holding has performed best? Give the ticker and its "
+        "percentage return from cost basis.",
+        "exact",
+        max_calls=4,
+    ),
+    EvalQuestion(
+        "q18",
+        "Which single holding has performed worst? Give the ticker and its "
+        "percentage return from cost basis.",
+        "exact",
+        max_calls=4,
+    ),
+    # q19 pins the USER'S NATURAL phrasing - "which stock, ETF, or MF has
+    # performed best?" with NO "cost basis"/"percentage return" hint. That
+    # wording is the REAL failure case: even with holding_returns available,
+    # the model (with cost-basis-less phrasing) fell back to reconstructing
+    # performance via 10x holding_history and blew the turn budget. q17's hint
+    # actively nudges toward holding_returns; q19 must reach it in <= 4 calls
+    # without any nudge - the eval fails if the model regresses to
+    # value-history reconstruction on the user's own wording.
+    EvalQuestion(
+        "q19",
+        "Which stock, ETF, or MF has performed best in my portfolio?",
+        "exact",
+        max_calls=4,
+    ),
 ]
 
 
@@ -150,18 +188,89 @@ def expected_top3_value_inr() -> float:
         conn.close()
 
 
+def expected_best_worst() -> tuple[float | None, str | None, float | None, str | None]:
+    """q17/q18 ground truth: best and worst % return from cost basis.
+
+    Computed DIRECTLY from the DB with the SAME formula as the portfolio_data
+    `holding_returns` tool (and export_json): (market_value_base -
+    cost_value_base) / cost_value_base * 100, over cost-bearing positions only
+    (cost_value_base IS NOT NULL AND != 0), rounded 2dp. Returns
+    (best_pct, best_ticker, worst_pct, worst_ticker); (pct, ticker) tuples
+    compare by pct then ticker, so ties break deterministically (ticker asc).
+    All None when the DB has no cost-bearing positions - the questions then
+    have no number/must_contain bar and pass on any answered, within-budget
+    result (skip gracefully, never crash the eval).
+    """
+    import sqlite3
+
+    from portfolio.config import DB_PATH
+
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        # Plain tuple rows (no row_factory - same convention as
+        # expected_top3_value_inr): (market_value_base, cost_value_base, ticker).
+        rows = conn.execute(
+            "SELECT p.market_value_base, p.cost_value_base, i.ticker"
+            " FROM position p JOIN instrument i ON i.id = p.instrument_id"
+            " WHERE p.cost_value_base IS NOT NULL AND p.cost_value_base != 0"
+        ).fetchall()
+    finally:
+        conn.close()
+    computed = [
+        (round((r[0] - r[1]) / r[1] * 100.0, 2), r[2])
+        for r in rows
+    ]
+    if not computed:
+        return None, None, None, None
+    best = max(computed)
+    worst = min(computed)
+    return best[0], best[1], worst[0], worst[1]
+
+
 def numbers_in(text: str) -> list[float]:
     """Every number in an answer, commas stripped, Indian/US formats both fine.
 
-    "1,23,456.00" and "123,456.00" both parse to 123456.0.
+    "1,23,456.00" and "123,456.00" both parse to 123456.0. An optional leading
+    minus binds only to a digit, so "-46.97%" parses as -46.97 while
+    "down 46.97" (no minus) stays positive 46.97. The plus sign is simply not
+    captured ("+394.07" -> 394.07).
     """
     out: list[float] = []
-    for token in re.findall(r"\d[\d,]*(?:\.\d+)?", text):
+    for token in re.findall(r"-?\d[\d,]*(?:\.\d+)?", text):
         try:
             out.append(float(token.replace(",", "")))
         except ValueError:
             continue
     return out
+
+
+def _within_tolerance(found: float, expected: float, tolerance: float) -> bool:
+    """Relative-error check accepting BOTH signed and magnitude matches.
+
+    Passes when EITHER the signed value is within tolerance of `expected`
+    OR the MAGNITUDE |found| is within tolerance of |expected|:
+        denom = abs(expected) or 1.0
+        signed_ok    = abs(found - expected) / denom <= tolerance
+        magnitude_ok = abs(abs(found) - abs(expected)) / denom <= tolerance
+        return signed_ok or magnitude_ok
+
+    WHY the magnitude mode: natural-language answers to negative-return
+    questions ("KPITTECH, 46.97% loss", "down 46.97%") carry the magnitude
+    WITHOUT a minus sign - numbers_in() then sees +46.97, and a signed-only
+    check rejects a substantively correct answer (the q18 false negative:
+    found=9.18 for an answer that named the right ticker and magnitude).
+    The ticker `must_contain` check is the grounding proof; the number check
+    proves the MAGNITUDE. Wrong magnitudes still fail (20.0 or 9.18 vs
+    expected -46.97 match neither mode). For a POSITIVE expected (q16/q17)
+    magnitude_ok is identical to signed_ok, so behavior is unchanged there.
+    The denominator is ABS(expected): a negative denominator would FLIP the
+    inequality and let any wrong answer pass (the original q18 gate bug).
+    Zero expected falls back to 1.0 so a 0-target still compares relatively.
+    """
+    denom = abs(expected) or 1.0
+    signed_ok = abs(found - expected) / denom <= tolerance
+    magnitude_ok = abs(abs(found) - abs(expected)) / denom <= tolerance
+    return signed_ok or magnitude_ok
 
 
 @dataclass
@@ -277,6 +386,10 @@ async def run_question(
             out.reasons.append(f"budget breach -> {reason}")
         elif len(result.tool_calls) < q.min_calls:
             out.reasons.append(f"only {len(result.tool_calls)} tool call(s); expected >= {q.min_calls}")
+        if q.max_calls is not None and len(result.tool_calls) > q.max_calls:
+            out.reasons.append(
+                f"{len(result.tool_calls)} tool calls; expected <= {q.max_calls}"
+            )
         if q.must_contain and q.must_contain.lower() not in result.answer.lower():
             out.reasons.append(f"answer missing expected content {q.must_contain!r}")
         if result.error and not result.answered:
@@ -290,10 +403,20 @@ async def run_question(
             if not candidates:
                 out.reasons.append(f"no number in answer (expected {q.expected:,.2f})")
             else:
-                found = min(candidates, key=lambda n: abs(n - q.expected))
+                # Select the candidate closest in EITHER signed or magnitude
+                # space, mirroring the two-mode _within_tolerance check: an
+                # answer phrased "down 46.97%" yields +46.97, which must be
+                # SELECTED (over a signed-closer-but-wrong number like 9.18)
+                # so the magnitude match can pass. Wrong magnitudes still fail
+                # the check below - selection never forgives a bad number.
+                found = min(
+                    candidates,
+                    key=lambda n: min(
+                        abs(n - q.expected), abs(abs(n) - abs(q.expected))
+                    ),
+                )
                 out.found = found
-                denom = q.expected or 1.0
-                if abs(found - q.expected) / denom > q.tolerance:
+                if not _within_tolerance(found, q.expected, q.tolerance):
                     out.reasons.append(
                         f"number mismatch: expected {q.expected:,.2f}, got {found:,.2f}"
                         f" (candidates {[round(n, 2) for n in candidates]})"
@@ -371,11 +494,21 @@ async def main(max_turns: int, timeout_s: float) -> int:
             DEFAULT_AUDIT_PATH.unlink()
 
         rows: list[QuestionResult] = []
+        # MINOR-3: exact-number ground truths are computed from the DB BEFORE
+        # any question runs, so the "independent" numbers can never be
+        # influenced by the agent's answers. q17/q19 get the best % from cost
+        # basis (holding_returns' formula) + the winning ticker as a
+        # must_contain (q19 = the user's natural no-hint phrasing); q18 gets
+        # the worst; q16 keeps its own top-3-value ground truth. The q17-q19
+        # branches come FIRST: they are also kind="exact" with expected=None,
+        # so the generic block below must not pre-empt them.
+        best_pct, best_ticker, worst_pct, worst_ticker = expected_best_worst()
         for q in QUESTIONS:
-            # MINOR-3: compute the exact-number ground truth from the DB BEFORE
-            # the question runs, so the "independent" number can never be
-            # influenced by the agent's answer.
-            if q.kind == "exact" and q.expected is None:
+            if q.qid == "q17" or q.qid == "q19":
+                q.expected, q.must_contain = best_pct, best_ticker
+            elif q.qid == "q18":
+                q.expected, q.must_contain = worst_pct, worst_ticker
+            elif q.kind == "exact" and q.expected is None:
                 q.expected = expected_top3_value_inr()
             print(f"\n>>> {q.qid} [{q.kind}] {q.question[:90]}")
             row = await run_question(client, q, max_turns=max_turns, timeout_s=timeout_s)

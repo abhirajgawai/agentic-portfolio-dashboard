@@ -3,6 +3,15 @@
  * Currency formatting uses Intl with the currency's native grouping.
  */
 
+/**
+ * Privacy-mask token — the single consistent placeholder for hidden amounts
+ * (₹/SGD money values) and share quantities when the privacy toggle is on.
+ * Percentages and counts are NOT wealth figures and stay visible, so they
+ * never pass through this token. Kept in format.ts (a pure module) so the
+ * ECharts option builders can use it without pulling React in.
+ */
+export const MASK_TEXT = '••••'
+
 const inr = new Intl.NumberFormat('en-IN', {
   style: 'currency',
   currency: 'INR',
@@ -114,4 +123,12 @@ export function formatAsOfLong(iso: string | null | undefined): string {
 /** Platform label for badges (lowercase keys -> Title Case). */
 export function platformLabel(platform: string): string {
   return platform.charAt(0).toUpperCase() + platform.slice(1)
+}
+
+/** Asset class label for badges/filters (snake_case -> Title Case). */
+export function assetClassLabel(assetClass: string): string {
+  return assetClass
+    .split('_')
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ')
 }

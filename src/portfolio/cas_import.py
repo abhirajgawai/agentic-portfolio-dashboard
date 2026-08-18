@@ -26,6 +26,10 @@ the June 2026 statement:
      already captures them — importing would double-count), but the account's
      demat MFs ARE imported (no live leg captures MFs).
 
+Sector/asset_class enrichment comes from the same curated data/sectors.csv the
+live legs use (portfolio.normalize.sectors.load_sectors). Equities are keyed by
+symbol; MFs are keyed by ISIN because the demat-MF ticker IS the ISIN.
+
 Deterministic: same PDF -> same rows. No LLM, no network (AMFI name
 enrichment is optional and best-effort).
 """
@@ -42,6 +46,7 @@ from typing import Any
 from portfolio.config import DB_PATH, Settings
 from portfolio.db import connect, writer
 from portfolio.normalize.schema import Holding, to_float
+from portfolio.normalize.sectors import load_sectors
 
 logger = logging.getLogger("portfolio.cas")
 
@@ -123,15 +128,21 @@ def extract_holdings(
     raw: Mapping[str, Any],
     *,
     nav_names: Mapping[str, str] | None = None,
+    sectors: Mapping[str, tuple[str | None, str | None]] | None = None,
 ) -> tuple[dict[tuple[str, str], list[Holding]], dict[str, Any]]:
     """Map a parsed CAS to common-schema Holdings, grouped by (platform,
     account_ref) so each broker account becomes one DB account.
+
+    `sectors` is the curated {ticker -> (sector, asset_class)} map from
+    data/sectors.csv: equities look up by symbol, MFs by ISIN. None -> {} (the
+    caller decides; import_cas loads the real map for the pipeline path).
 
     Returns (groups, stats) where stats reports how many rows carry a cost
     basis (returns computable) vs value-only, and how many zerodha equities
     were skipped as live-captured.
     """
     nav_names = nav_names or {}
+    sectors = sectors or {}
     groups: dict[tuple[str, str], list[Holding]] = {}
     stats: dict[str, Any] = {"cost_known": 0, "cost_missing": 0, "skipped_zerodha_equities": 0, "by_platform": {}}
 
@@ -146,14 +157,14 @@ def extract_holdings(
             if platform in LIVE_EQUITY_PLATFORMS:
                 stats["skipped_zerodha_equities"] += 1
                 continue
-            holding = _equity_holding(item, platform)
+            holding = _equity_holding(item, platform, sectors)
             if holding is not None:
                 groups[key].append(holding)
                 stats["by_platform"][platform] += 1
                 stats["cost_missing"] += 1  # CAS equities never carry cost
 
         for item in account.get("mutual_funds") or []:
-            holding = _mf_holding(item, platform, nav_names)
+            holding = _mf_holding(item, platform, nav_names, sectors)
             if holding is not None:
                 groups[key].append(holding)
                 stats["by_platform"][platform] += 1
@@ -164,7 +175,9 @@ def extract_holdings(
     return {k: v for k, v in groups.items() if v}, stats
 
 
-def _equity_holding(item: Mapping[str, Any], platform: str) -> Holding | None:
+def _equity_holding(
+    item: Mapping[str, Any], platform: str, sectors: Mapping[str, tuple[str | None, str | None]]
+) -> Holding | None:
     isin = item.get("isin")
     ticker = item.get("symbol") or isin
     quantity = _num(item.get("num_shares"))
@@ -173,6 +186,8 @@ def _equity_holding(item: Mapping[str, Any], platform: str) -> Holding | None:
     if not ticker or quantity is None or price is None:
         logger.warning("cas equity row without ticker/qty/price skipped: %s", isin)
         return None
+    # Curated map is keyed by trading symbol for equities.
+    sector, csv_asset = sectors.get(str(ticker), (None, None))
     return Holding(
         platform=platform,
         geography="IN",
@@ -184,13 +199,16 @@ def _equity_holding(item: Mapping[str, Any], platform: str) -> Holding | None:
         cost_basis=None,
         current_value=value if value is not None else price * quantity,
         currency="INR",
-        sector=None,
-        asset_class="equity",
+        sector=sector,  # None when unmapped - "unknown" is a dashboard-only label
+        asset_class=csv_asset or "equity",
     )
 
 
 def _mf_holding(
-    item: Mapping[str, Any], platform: str, nav_names: Mapping[str, str]
+    item: Mapping[str, Any],
+    platform: str,
+    nav_names: Mapping[str, str],
+    sectors: Mapping[str, tuple[str | None, str | None]],
 ) -> Holding | None:
     isin = item.get("isin")
     units = _num(item.get("balance"))
@@ -205,7 +223,9 @@ def _mf_holding(
     amfi_name = nav_names.get(str(isin))
     name = _clean_name(amfi_name or (pdf_name if not _is_amc_only(pdf_name) else None))
     # Gold/silver ETFs live in the same demat-MF section; classify by name.
-    asset_class = "etf" if name and "ETF" in name.upper() else "mutual_fund"
+    # The CSV's asset_class wins when present (consistent with snapshot.py).
+    sector, csv_asset = sectors.get(str(isin), (None, None))
+    asset_class = csv_asset or ("etf" if name and "ETF" in name.upper() else "mutual_fund")
     return Holding(
         platform=platform,
         geography="IN",
@@ -217,7 +237,7 @@ def _mf_holding(
         cost_basis=_num(item.get("total_cost")),  # folio rows carry it; demat None
         current_value=value if value is not None else nav * units,
         currency="INR",
-        sector=None,
+        sector=sector,  # fund category (Flexi Cap, Gold, ...) - None when unmapped
         asset_class=asset_class,
     )
 
@@ -228,6 +248,7 @@ def import_cas(
     password: str = "",
     *,
     enrich_names: bool = True,
+    sectors: Mapping[str, tuple[str | None, str | None]] | None = None,
 ) -> str:
     """Parse a CAS PDF and persist holdings + daily ledger to the DB.
 
@@ -235,6 +256,10 @@ def import_cas(
     batch with is_eod=True at the statement end date, so CAS rows land in
     `position` (live state), `position_snapshot` (monthly ledger), and
     `price_history` (statement NAV) exactly like a broker EOD run.
+
+    `sectors` defaults to the same curated data/sectors.csv the live legs use
+    (ISIN-keyed for MFs) so the pipeline path never needs an explicit map;
+    pass {} to opt out.
 
     The legacy portfolio_value write path is gone entirely (F1) - per-batch
     writes clobbered the UNIQUE(value_date, is_eod, scope_type, scope_key) slot
@@ -257,7 +282,7 @@ def import_cas(
         except NAVError as exc:  # names are best-effort; the import proceeds
             logger.warning("AMFI name enrichment unavailable: %s", exc)
 
-    holdings_groups, stats = extract_holdings(raw, nav_names=nav_names)
+    holdings_groups, stats = extract_holdings(raw, nav_names=nav_names, sectors=sectors or load_sectors())
     if not holdings_groups:
         raise ValueError("CAS yielded no importable holdings")
 

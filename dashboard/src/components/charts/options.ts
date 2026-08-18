@@ -6,6 +6,8 @@
 
 import type { EChartsOption } from 'echarts'
 
+import { MASK_TEXT } from '@/lib/format'
+
 /** Muted foreground — matches --muted-foreground so charts blend with the UI. */
 export const CHART_TEXT = '#9b9ba3'
 export const AXIS_LINE = 'rgba(255,255,255,0.08)'
@@ -122,8 +124,12 @@ export function trendAreaOption(opts: {
   dates: string[]
   series: Array<{ name: string; data: number[]; area?: boolean }>
   formatter?: (value: number) => string
+  /** When true, currency labels (tooltip + y-axis) render as MASK_TEXT.
+   *  The curve itself stays visible — only the numbers are hidden. */
+  masked?: boolean
 }): EChartsOption {
   const fmt = opts.formatter ?? ((v: number) => String(v))
+  const valueFmt = (v: number) => (opts.masked ? MASK_TEXT : fmt(v))
   return {
     backgroundColor: 'transparent',
     textStyle: baseTextStyle,
@@ -133,7 +139,7 @@ export function trendAreaOption(opts: {
       backgroundColor: 'rgba(20,20,24,0.92)',
       borderColor: 'rgba(255,255,255,0.1)',
       textStyle: { color: '#e8e8ea' },
-      valueFormatter: (v: unknown) => fmt(typeof v === 'number' ? v : 0),
+      valueFormatter: (v: unknown) => valueFmt(typeof v === 'number' ? v : 0),
     },
     grid: { left: 8, right: 8, top: 28, bottom: 4, containLabel: true },
     xAxis: {
@@ -149,7 +155,7 @@ export function trendAreaOption(opts: {
       axisLabel: {
         color: CHART_TEXT,
         fontSize: 11,
-        formatter: (v: number) => fmt(v),
+        formatter: (v: number) => valueFmt(v),
       },
       splitLine: { lineStyle: { color: AXIS_LINE } },
     },

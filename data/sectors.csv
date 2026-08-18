@@ -35,6 +35,8 @@ LT,Infrastructure,equity
 MON100,International Equity,etf
 PFC,Financial Services,equity
 PRICOLLTD,Consumer Packaging,equity
+RELAXO,Consumer,equity
+RELIANCE,Energy,equity
 RVNL,Infrastructure,equity
 SONACOMS,Auto Components,equity
 SPLPETRO,Chemicals,equity
@@ -42,3 +44,26 @@ SUPREMEIND,Consumer Packaging,equity
 WAAREEENER,Renewables,equity
 WABAG,Water & Environment,equity
 ZENTEC,Information Technology,equity
+# Zerodha's Motilal Oswal Nasdaq 100 ETF: Kite reports the ISIN as the trading
+# symbol (no MON100-style code), so the ISIN is the map key - it matches both
+# the live MCP leg and the CAS demat-MF row.
+INF247L01AP3,International Equity,etf
+# ---- Groww mutual funds / ETFs (keyed by ISIN) ----
+# CAS demat-MF rows have NO symbol - the holding ticker IS the ISIN (e.g.
+# INF879O01027 = Parag Parikh Flexi Cap), so the map is keyed by ISIN here.
+# Sector = the AMFI/Groww fund category (Flexi Cap, Small Cap, Mid Cap, Index
+# Fund, Hybrid, Gold, Silver, International Equity) so the dashboard donut
+# groups funds the way the Groww app does.
+INF109KC1Y56,Silver,etf
+INF179K01WA6,Hybrid,mutual_fund
+INF179K01WN9,Index Fund,mutual_fund
+INF179K01XQ0,Mid Cap,mutual_fund
+INF204K01K15,Small Cap,mutual_fund
+INF204KB17I5,Gold,etf
+INF666M01OE7,Gold,etf
+INF754K01QD2,Index Fund,mutual_fund
+INF769K01LG4,Small Cap,etf
+INF789F1AUT5,Index Fund,mutual_fund
+INF789F1AYN0,Index Fund,mutual_fund
+INF846K01K35,Small Cap,mutual_fund
+INF879O01027,Flexi Cap,mutual_fund

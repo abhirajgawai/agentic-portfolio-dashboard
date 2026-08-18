@@ -160,6 +160,112 @@ def latest_snapshot(
 
 
 @server.tool()
+def holding_returns(
+    platform: str | None = None,
+    ticker: str | None = None,
+    sector: str | None = None,
+    asset_class: str | None = None,
+    limit: int = DEFAULT_LIMIT,
+) -> dict[str, Any]:
+    """Per-holding return vs cost basis - "which holding performed best/worst".
+
+    returnPct = (market_value_base - cost_value_base) / cost_value_base * 100,
+    the SAME formula export_json uses for the dashboard's returnPct, so the
+    agent's number always matches the dashboard's. Holdings with no cost basis
+    (the M3 CAS value-only rows) have returnPct = null and sort LAST - a
+    costless row can never masquerade as the best performer. Returns
+    {count, withCost, noCost, holdings: [...]}, each holding with platform,
+    geography, ticker, name, currency, sector, asset_class, quantity, price,
+    costValueBase, marketValueBase, returnPct (null when costless) and
+    updated_at. Optional exact filters: platform (zerodha|moomoo|groww|
+    sharekhan), ticker (case-insensitive), sector (case-insensitive),
+    asset_class (case-insensitive - e.g. "best MF vs best ETF vs best stock").
+    Sorted by returnPct descending (costless last), limited to `limit`
+    (max 500). Read-only.
+    """
+    try:
+        pf = _platform_ok(platform)
+        tk = _opt_str(ticker, upper=True)
+        se = _opt_str(sector)
+        ac = _opt_str(asset_class)
+    except ValueError as exc:
+        return _error(str(exc))
+    where, params = ["1=1"], []
+    if pf is not None:
+        where.append("a.platform = ?")
+        params.append(pf)
+    if tk is not None:
+        where.append("UPPER(i.ticker) = UPPER(?)")
+        params.append(tk)
+    if se is not None:
+        where.append("LOWER(i.sector) = LOWER(?)")
+        params.append(se)
+    if ac is not None:
+        where.append("LOWER(i.asset_class) = LOWER(?)")
+        params.append(ac)
+    n = _clamp(limit)
+    # The SQL LIMIT is MAX_LIMIT, NOT the caller's limit: the caller's limit
+    # must apply AFTER the return sort (best first), so the match set is
+    # fetched up to the module-wide cap (bounded; the DB holds ~tens of rows)
+    # and sliced to `n` below. A SQL-side `LIMIT n` would truncate before
+    # sorting and could silently drop the true best performer.
+    params.append(MAX_LIMIT)
+    sql = f"""
+        SELECT a.platform, i.geography, i.ticker, i.name, i.currency,
+               i.sector, i.asset_class, p.quantity, p.price,
+               p.cost_value_base, p.market_value_base, p.updated_at
+        FROM position p
+        JOIN account a    ON a.id = p.account_id
+        JOIN instrument i ON i.id = p.instrument_id
+        WHERE {' AND '.join(where)}
+        LIMIT ?
+    """
+    try:
+        with _connect() as conn:
+            rows = conn.execute(sql, params).fetchall()
+    except sqlite3.Error as exc:
+        return _error(str(exc))
+    holdings: list[dict[str, Any]] = []
+    for r in rows:
+        ret = None
+        if r["cost_value_base"]:  # truthy check == export_json semantics
+            ret = round(
+                (r["market_value_base"] - r["cost_value_base"])
+                / r["cost_value_base"] * 100.0,
+                2,
+            )
+        holdings.append(
+            {
+                "platform": r["platform"],
+                "geography": r["geography"],
+                "ticker": r["ticker"],
+                "name": r["name"],
+                "currency": r["currency"],
+                "sector": r["sector"],
+                "asset_class": r["asset_class"],
+                "quantity": r["quantity"],
+                "price": r["price"],
+                "costValueBase": r["cost_value_base"],
+                "marketValueBase": r["market_value_base"],
+                "returnPct": ret,
+                "updated_at": r["updated_at"],
+            }
+        )
+    # Best first, costless (returnPct null) LAST: (is_none, -pct) sorts all
+    # False before True, and among the cost-bearing rows puts the largest
+    # return first. Never a None/float comparison (that would raise).
+    holdings.sort(key=lambda h: (h["returnPct"] is None, -(h["returnPct"] or 0.0)))
+    holdings = holdings[:n]
+    with_cost = sum(1 for h in holdings if h["returnPct"] is not None)
+    return {
+        "count": len(holdings),
+        "withCost": with_cost,
+        "noCost": len(holdings) - with_cost,
+        "holdings": holdings,
+    }
+
+
+@server.tool()
 def allocation_summary() -> dict[str, Any]:
     """Portfolio allocation from the latest positions, in the base currency.
 

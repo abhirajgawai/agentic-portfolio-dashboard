@@ -4,7 +4,8 @@ import { ArrowDownRight, ArrowUpRight, Minus, TrendingUp } from 'lucide-react'
 
 import { Card, CardDescription, CardTitle } from '@/components/ui/card'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { formatInr, formatInrCompact, formatInrPrecise, formatPct } from '@/lib/format'
+import { formatInr, formatInrCompact, formatInrPrecise, formatPct, MASK_TEXT } from '@/lib/format'
+import { usePrivacy } from '@/lib/privacy'
 import { simpleReturn } from '@/lib/returns'
 import type { Latest, Xirr } from '@/types/contract'
 import { cn } from '@/lib/utils'
@@ -65,18 +66,19 @@ export function OverviewCards({ latest, xirr }: { latest: Latest; xirr: Xirr | u
   const xirrInfo = pickXirrHeadline(xirr)
   const accountCurrencies = Object.entries(totals.byAccountCurrency)
   const dayPnlCurrencies = Object.entries(totals.dayPnlByAccountCurrency)
+  const { masked } = usePrivacy()
 
   return (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
       <CardShell
         title="Total value"
         hint="Consolidated portfolio value in the base currency (INR), across all platforms."
-        headline={formatInrCompact(totals.valueBase)}
+        headline={masked ? MASK_TEXT : formatInrCompact(totals.valueBase)}
         headlineClass="text-gain"
         sub={
           <span className="text-[11px]">
-            {formatInr(totals.valueBase)} ·{' '}
-            {accountCurrencies.map(([ccy, v]) => `${ccy} ${formatInrCompact(v)}`).join(' / ')}
+            {masked ? MASK_TEXT : formatInr(totals.valueBase)} ·{' '}
+            {accountCurrencies.map(([ccy, v]) => `${ccy} ${masked ? MASK_TEXT : formatInrCompact(v)}`).join(' / ')}
           </span>
         }
       />
@@ -86,14 +88,14 @@ export function OverviewCards({ latest, xirr }: { latest: Latest; xirr: Xirr | u
         headline={
           <span className={cn('flex items-center gap-1', totals.dayPnl > 0 ? 'text-gain' : totals.dayPnl < 0 ? 'text-loss' : '')}>
             <DeltaIcon value={totals.dayPnl} />
-            {formatInrCompact(totals.dayPnl)}
+            {masked ? MASK_TEXT : formatInrCompact(totals.dayPnl)}
           </span>
         }
         headlineClass={totals.dayPnl >= 0 ? 'text-gain' : 'text-loss'}
         sub={
           <span className="text-[11px]">
             {dayPnlCurrencies.length > 0
-              ? dayPnlCurrencies.map(([ccy, v]) => `${ccy} ${formatInrPrecise(v)}`).join(' / ')
+              ? dayPnlCurrencies.map(([ccy, v]) => `${ccy} ${masked ? MASK_TEXT : formatInrPrecise(v)}`).join(' / ')
               : 'no day P&L data'}
           </span>
         }

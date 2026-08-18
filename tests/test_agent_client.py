@@ -153,3 +153,134 @@ def test_audit_question_is_masked_and_truncated(tmp_path):
     assert len(row["question"]) <= 120
     assert row["tool"] == "portfolio_data_latest_snapshot"
     assert row["args"] == {"platform": "zerodha"}
+
+
+# -- M7 bugfix: one tool invocation emits MULTIPLE message.part.updated events
+# -- with the same part.id (pending -> running -> completed/error). The FIRST
+# -- event counts the turn; later events must UPDATE the stored call's status
+# -- in place, and the audit row must carry the FINAL status, written exactly
+# -- once per tool call.
+
+def _tool_part(part_id: str, tool: str, status: str, *, error: str | None = None) -> dict:
+    state: dict = {"input": {"platform": "zerodha"}, "status": status}
+    if error is not None:
+        state["error"] = error
+    return {"id": part_id, "type": "tool", "tool": tool, "state": state}
+
+
+def test_tool_event_first_seen_counts_turn_once():
+    from portfolio.agent.client import ToolCall, _apply_tool_event
+
+    seen: dict[str, ToolCall] = {}
+    turn_count, changed = _apply_tool_event(_tool_part("p1", "portfolio_data_x", "pending"), seen, 0)
+    assert turn_count == 1
+    assert changed is True
+    assert len(seen) == 1
+    call = seen["p1"]
+    assert call.tool == "portfolio_data_x"
+    assert call.status == "pending"
+    assert call.turn_index == 1
+    assert call.args == {"platform": "zerodha"}
+
+    # Same part id, same status (duplicate event): no second turn, no change.
+    turn_count, changed = _apply_tool_event(_tool_part("p1", "portfolio_data_x", "pending"), seen, turn_count)
+    assert turn_count == 1
+    assert changed is False
+    assert len(seen) == 1
+
+    # A DIFFERENT part id is a new tool call -> second turn.
+    turn_count, changed = _apply_tool_event(_tool_part("p2", "kite_get_holdings", "pending"), seen, turn_count)
+    assert turn_count == 2
+    assert changed is True
+    assert len(seen) == 2
+
+
+def test_tool_event_status_updates_in_place_until_completed():
+    from portfolio.agent.client import ToolCall, _apply_tool_event
+
+    seen: dict[str, ToolCall] = {}
+    turn_count = 0
+    for status in ("pending", "running", "completed"):
+        turn_count, changed = _apply_tool_event(_tool_part("p1", "kite_get_holdings", status), seen, turn_count)
+        assert turn_count == 1  # one distinct tool call across all three events
+    assert len(seen) == 1
+    call = seen["p1"]
+    assert call.status == "completed"  # FINAL status, not the first-seen "pending"
+    assert call.error is None
+    assert call.turn_index == 1  # original turn index preserved
+    assert call.tool == "kite_get_holdings"
+
+
+def test_tool_event_error_status_captures_error():
+    from portfolio.agent.client import ToolCall, _apply_tool_event
+
+    seen: dict[str, ToolCall] = {}
+    turn_count = 0
+    for status in ("pending", "running"):
+        turn_count, _ = _apply_tool_event(_tool_part("p1", "portfolio_data_x", status), seen, turn_count)
+    turn_count, changed = _apply_tool_event(
+        _tool_part("p1", "portfolio_data_x", "error", error="rate limited"), seen, turn_count
+    )
+    assert turn_count == 1
+    assert changed is True
+    assert seen["p1"].status == "error"
+    assert seen["p1"].error == "rate limited"
+
+
+def test_audit_row_written_once_with_final_status(tmp_path):
+    """The new flow (first-seen -> track; terminal -> audit; end -> flush)
+    writes EXACTLY ONE audit row per tool call, carrying the FINAL status."""
+    from portfolio.agent.client import OpenCodeClient, ToolCall, _apply_tool_event
+
+    client = OpenCodeClient(base_url="http://127.0.0.1:1", audit_path=tmp_path / "audit.jsonl")
+    seen: dict[str, ToolCall] = {}
+    audited: set[str] = set()
+    turn_count = 0
+    question = "what is my total portfolio value? " + ("z" * 400)
+
+    # Handler per-event path: apply the event, then audit terminal calls.
+    for status in ("pending", "running", "completed"):
+        turn_count, _ = _apply_tool_event(_tool_part("p1", "portfolio_data_portfolio_total", status), seen, turn_count)
+        client._maybe_audit(seen, audited, session_id="ses_A", question=question)
+    assert turn_count == 1
+
+    # End-of-turn flush (the ask() `finally`): must NOT write a second row.
+    client._maybe_audit(seen, audited, session_id="ses_A", question=question, force=True)
+
+    rows = [json.loads(line) for line in (tmp_path / "audit.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert len(rows) == 1
+    assert rows[0]["status"] == "completed"  # final status, never "pending"
+    assert rows[0]["tool"] == "portfolio_data_portfolio_total"
+    assert rows[0]["args"] == {"platform": "zerodha"}
+    assert rows[0]["turn_index"] == 1
+    assert len(rows[0]["question"]) <= 120  # MINOR-2 masking path still applied
+
+
+def test_aborted_turn_pending_call_flushed_with_last_status(tmp_path):
+    """A call that never reaches a terminal status (aborted turn) is audited
+    at turn end with its last-seen status - not dropped, not duplicated."""
+    from portfolio.agent.client import OpenCodeClient, ToolCall, _apply_tool_event
+
+    client = OpenCodeClient(base_url="http://127.0.0.1:1", audit_path=tmp_path / "audit.jsonl")
+    seen: dict[str, ToolCall] = {}
+    audited: set[str] = set()
+    turn_count = 0
+
+    # The turn is aborted while the call is still running: mid-turn audits
+    # must NOT write anything (status is not terminal yet).
+    for status in ("pending", "running"):
+        turn_count, _ = _apply_tool_event(_tool_part("p1", "portfolio_data_x", status), seen, turn_count)
+        client._maybe_audit(seen, audited, session_id="ses_A", question="aborted question")
+    assert not (tmp_path / "audit.jsonl").exists()
+
+    # End-of-turn flush (abort/`finally` path) writes the row once.
+    client._maybe_audit(seen, audited, session_id="ses_A", question="aborted question", force=True)
+    rows = [json.loads(line) for line in (tmp_path / "audit.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert len(rows) == 1
+    assert rows[0]["status"] == "running"  # last-known status before the abort
+    assert rows[0]["turn_index"] == 1
+
+    # A second flush is a no-op: the exactly-once guarantee holds.
+    client._maybe_audit(seen, audited, session_id="ses_A", question="aborted question", force=True)
+    rows = [json.loads(line) for line in (tmp_path / "audit.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert len(rows) == 1

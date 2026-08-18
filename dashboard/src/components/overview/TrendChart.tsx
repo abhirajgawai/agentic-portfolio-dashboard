@@ -7,9 +7,12 @@ import { EChart } from '@/components/charts/EChart'
 import { trendAreaOption } from '@/components/charts/options'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { formatInrCompact } from '@/lib/format'
+import { usePrivacy } from '@/lib/privacy'
 import type { History } from '@/types/contract'
 
 export function TrendChart({ history }: { history: History }) {
+  const { masked } = usePrivacy()
+
   const option = useMemo(() => {
     const geoSeries = Object.entries(history.byGeography).map(([geo, values]) => ({
       name: geo,
@@ -22,8 +25,9 @@ export function TrendChart({ history }: { history: History }) {
         ...geoSeries,
       ],
       formatter: (v) => formatInrCompact(v),
+      masked,
     })
-  }, [history])
+  }, [history, masked])
 
   return (
     <Card>
