@@ -638,6 +638,28 @@ Tokens live in `data/tokens.json` (gitignored), never in the DB or snapshots.
   StatusBar stale tooltip wording, HoldingsTable accessor naming, Host-header belt on
   the bridge, chat tool-chip final-status display.
 
+### M8.5 — Real-estate property leg (unplanned, adopted 2026-08-18)
+- **Origin:** implemented in an earlier opencode session as a manual valuation
+  entry for real estate (MVP); verified 2026-08-18 (166 passed / 2 skipped, ruff
+  clean on feature code, runtime-consistent with the shared `persist`/`writer`
+  plumbing) and adopted into the plan.
+- **`src/portfolio/property_import.py` + `portfolio property import`** — a property
+  JSON (gitignored `data/properties/`, carries address/valuations = PII) → one
+  holding (`platform=real_estate`, `asset_class=real_estate`) + trade rows for
+  XIRR (purchase outflow, each improvement outflow, terminal as-if-sold inflow on
+  valuation date); idempotent via `external_id` dedupe; full run audit
+  (`running → ok/error`).
+- **Bridge + UI:** `POST /api/property/import` + `DELETE /api/property/{id}` in
+  `src/portfolio/bridge.py` (shells out to the real CLI, temp-file JSON, 60s
+  timeout, clean 502 mapping); new "Properties" tab (`PropertiesScreen.tsx`,
+  `Home` icon) + `radix-ui` dep in `dashboard/package.json`. **Note:** this
+  touched `contract.ts` (Property import/response Zod schemas added) — flagged as
+  a one-off exception to the immutable-contract rule; future changes must route
+  through design review.
+- ✅ Done when: `portfolio property import data/properties/PROP_BLR_001.json`
+  persists holding + trades and the Properties tab renders it from the exported
+  JSON (verified live by the implementing session).
+
 ### M9 — Deployment (2–3 evenings)
 - Migrate SQLite → Supabase (schema ports 1:1) — the shared spine: local legs and cloud
   legs write the SAME store (SQLite's single-writer rule forbids two hosts).

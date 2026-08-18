@@ -42,7 +42,7 @@ alerts:
 - Failures to send are logged and retried once.
 
 ## Output
-- `data/exports/alerts.json`: `{ generated_at, alerts: [...] }` for the dashboard.
+- `dashboard/public/data/alerts.json`: `{ generatedAt, alerts: [...] }` for the dashboard.
 
 ## Tests
 - Rule triggers exactly when condition holds; dedupe suppresses repeats; batching

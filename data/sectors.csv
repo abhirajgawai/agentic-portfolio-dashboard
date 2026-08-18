@@ -67,3 +67,5 @@ INF789F1AUT5,Index Fund,mutual_fund
 INF789F1AYN0,Index Fund,mutual_fund
 INF846K01K35,Small Cap,mutual_fund
 INF879O01027,Flexi Cap,mutual_fund
+# ---- Real Estate (keyed by property_id) ----
+PROP_BLR_001,Residential,real_estate

@@ -15,7 +15,7 @@ description: M9 deployment — Supabase migration of the SQLite schema, GitHub A
 - Schedule for NYSE/IST market days (avoid weekends/holidays via pipeline calendar
   gate). Replaces Windows Task Scheduler.
 - Steps: checkout → setup uv + python → install → `uv run pipeline snapshot --eod`
-  → upload `data/exports/` artifacts.
+  → upload `dashboard/public/data/` artifacts.
 - If real tokens are absent, the `SENTINEL` flag runs the job with fixture data only
   (no broker connections).
 

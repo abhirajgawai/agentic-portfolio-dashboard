@@ -29,7 +29,8 @@ description: Compute per-ticker and portfolio returns, and portfolio XIRR with t
 - Return annualized rate; also expose the IRR array for the dashboard chart.
 
 ## Output
-- `data/exports/xirr.json`: `{ as_of, xirr_pct, cash_flows: [...], terminal_value }`.
+- `dashboard/public/data/xirr.json`: `{ asOf, perAccount: { "<platform>__<id>": {currency,
+  xirrPct, terminalValue, flowCount} }, estimated }`.
 
 ## Determinism & correctness
 - Trades captured daily; if trade capture misses a day, snapshot-to-snapshot deltas

@@ -12,7 +12,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { z } from 'zod'
 
-import { AlertsSchema, HistorySchema, LatestSchema, XirrSchema } from '@/types/contract'
+import { AlertsSchema, HistorySchema, LatestSchema, XirrSchema, PropertyImportRequestSchema, PropertyImportResponseSchema } from '@/types/contract'
 
 /** Base URL for the contract files. Empty = same origin (`/data/*.json`). */
 const DATA_ROOT = (import.meta.env.VITE_DATA_BASE_URL as string | undefined) ?? ''
@@ -81,4 +81,63 @@ export function useAlerts() {
 
 export function useXirr() {
   return useQuery({ queryKey: ['xirr'], queryFn: loadXirr, ...QUERY_OPTIONS })
+}
+
+/* ------------------------------------------------------------------ */
+/* Property import (POST to bridge)                                    */
+/* ------------------------------------------------------------------ */
+
+export type PropertyImportRequest = z.infer<typeof PropertyImportRequestSchema>
+export type PropertyImportResponse = z.infer<typeof PropertyImportResponseSchema>
+
+/** Base URL for the bridge API (same origin in dev via Vite proxy). */
+const API_ROOT = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? ''
+
+const apiUrl = (path: string) => `${API_ROOT}/api${path}`
+
+/** Import or update a property valuation via the bridge. */
+export async function importProperty(req: PropertyImportRequest): Promise<PropertyImportResponse> {
+  const res = await fetch(apiUrl('/property/import'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  })
+  const raw: unknown = await res.json()
+  const parsed = PropertyImportResponseSchema.safeParse(raw)
+  if (!parsed.success) {
+    throw new Error(`Property import response invalid: ${parsed.error.message}`)
+  }
+  if (!res.ok || !parsed.data.ok) {
+    throw new Error(parsed.data.error ?? `HTTP ${res.status}`)
+  }
+  return parsed.data
+}
+
+/* ------------------------------------------------------------------ */
+/* Property delete (DELETE to bridge)                                  */
+/* ------------------------------------------------------------------ */
+
+export const PropertyDeleteResponseSchema = z.object({
+  ok: z.boolean(),
+  deleted: z.string().optional(),
+  export: z.string().optional(),
+  error: z.string().optional(),
+})
+
+export type PropertyDeleteResponse = z.infer<typeof PropertyDeleteResponseSchema>
+
+/** Delete a property via the bridge. */
+export async function deleteProperty(propertyId: string): Promise<PropertyDeleteResponse> {
+  const res = await fetch(apiUrl(`/property/${propertyId}`), {
+    method: 'DELETE',
+  })
+  const raw: unknown = await res.json()
+  const parsed = PropertyDeleteResponseSchema.safeParse(raw)
+  if (!parsed.success) {
+    throw new Error(`Property delete response invalid: ${parsed.error.message}`)
+  }
+  if (!res.ok || !parsed.data.ok) {
+    throw new Error(parsed.data.error ?? `HTTP ${res.status}`)
+  }
+  return parsed.data
 }

@@ -149,6 +149,34 @@ export const XirrSchema = z.object({
 })
 
 /* ------------------------------------------------------------------ */
+/* Property (UI import)                                                */
+/* ------------------------------------------------------------------ */
+
+export const PropertyImprovementSchema = z.object({
+  date: z.string(),           // YYYY-MM-DD
+  amount: z.number(),
+  description: z.string().optional(),
+})
+
+export const PropertyImportRequestSchema = z.object({
+  property_id: z.string(),
+  address: z.string(),
+  property_type: z.string().default("residential"),
+  purchase_date: z.string(),  // YYYY-MM-DD
+  purchase_price: z.number(),
+  current_valuation: z.number(),
+  valuation_date: z.string().optional(),  // YYYY-MM-DD, defaults to today
+  improvements: z.array(PropertyImprovementSchema).default([]),
+})
+
+export const PropertyImportResponseSchema = z.object({
+  ok: z.boolean(),
+  import: z.string().optional(),
+  export: z.string().optional(),
+  error: z.string().optional(),
+})
+
+/* ------------------------------------------------------------------ */
 /* Inferred types                                                      */
 /* ------------------------------------------------------------------ */
 
@@ -162,3 +190,6 @@ export type Alert = z.infer<typeof AlertSchema>
 export type Alerts = z.infer<typeof AlertsSchema>
 export type Xirr = z.infer<typeof XirrSchema>
 export type XirrEntry = z.infer<typeof XirrEntrySchema>
+export type PropertyImportRequest = z.infer<typeof PropertyImportRequestSchema>
+export type PropertyImportResponse = z.infer<typeof PropertyImportResponseSchema>
+export type PropertyImprovement = z.infer<typeof PropertyImprovementSchema>

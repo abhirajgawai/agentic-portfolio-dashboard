@@ -34,6 +34,8 @@ nav_app = typer.Typer(help="AMFI NAV commands (daily MF price refresh).")
 app.add_typer(nav_app, name="nav")
 fx_app = typer.Typer(help="Foreign exchange commands (daily rate table, keyless).")
 app.add_typer(fx_app, name="fx")
+prop_app = typer.Typer(help="Real estate property import (manual valuation entry).")
+app.add_typer(prop_app, name="property")
 
 logger = logging.getLogger("portfolio.cli")
 
@@ -310,6 +312,39 @@ def fx_refresh() -> None:
         conn.close()
     summary = " ".join(f"{q}{base}={_fmt_rate(rates[q])}" for q in quotes)
     typer.echo(f"fx refresh: {summary}")
+
+
+@prop_app.command("import")
+def prop_import(
+    json_file: Annotated[str, typer.Argument(help="path to the property JSON file")],
+    valuation_date: Annotated[str | None, typer.Option("--valuation-date", help="override valuation date (YYYY-MM-DD)")] = None,
+) -> None:
+    """Import a property valuation JSON and persist to the DB.
+
+    The JSON format (manual entry, gitignored data/properties/):
+    {
+      "property_id": "PROP_BLR_001",
+      "address": "123 Whitefield, Bangalore",
+      "property_type": "residential",
+      "purchase_date": "2020-03-15",
+      "purchase_price": 8500000,
+      "current_valuation": 12000000,
+      "improvements": [
+        { "date": "2021-06-01", "amount": 500000, "description": "Kitchen renovation" }
+      ]
+    }
+
+    Creates a holding (asset_class="real_estate") + trade rows for XIRR:
+    - Purchase (outflow) on purchase_date
+    - Each improvement (outflow) on its date
+    - Terminal (as-if-sold inflow) on valuation_date (today by default)
+
+    Re-running with the same JSON is idempotent (dedupe via external_id).
+    """
+    from portfolio.property_import import import_property
+
+    result = import_property(json_file, valuation_date=valuation_date)
+    typer.echo(f"property import: {result}")
 
 
 def _opend_reachable(host: str = "127.0.0.1", port: int = 11111) -> bool:

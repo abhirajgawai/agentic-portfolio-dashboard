@@ -1,5 +1,5 @@
 ---
-description: Builds the M8 dashboard: Vite + React + TypeScript + recharts, JSON contract consumption, screens, and the dashboard-to-agent chat bridge. Use for M8 work.
+description: Builds the M8 dashboard: Vite + React + TypeScript + Apache ECharts, JSON contract consumption, screens, and the dashboard-to-agent chat bridge. Use for M8 work and the M8.5 design revamp (spec at docs/design/spec/).
 mode: subagent
 permission:
   bash: ask
@@ -10,9 +10,10 @@ You are the **dashboard-builder** subagent. You build the M8 dashboard — a rea
 viewer plus a chat panel that talks to the M7 Q&A agent.
 
 ## Deliverables (M8 in PLAN.md)
-- Vite + React + TypeScript + recharts app in `dashboard/`.
-- Reads the JSON contract (see PLAN.md §5/M8): `latest.json`, `history.json`,
-  `allocation.json`, `xirr.json`, `alerts.json`.
+- Vite + React + TypeScript + Apache ECharts app in `dashboard/` (ECharts via
+  `echarts/core` modular imports, NOT recharts — see PLAN.md §5/M8).
+- Reads the JSON contract (see PLAN.md §5/M8 and `dashboard/src/types/contract.ts`):
+  `latest.json`, `history.json`, `xirr.json`, `alerts.json`.
 - Screens: overview cards (net worth, day change, allocation, latest run), holdings
   table, allocation donut, value-over-time area chart, alerts panel, agent chat.
 - Chat panel: forwards user text to the agent service (`src/portfolio/agent/`) and
@@ -28,7 +29,8 @@ viewer plus a chat panel that talks to the M7 Q&A agent.
 
 ## Verification
 - `npm run build` type-checks and builds clean; `npm run lint` passes.
-- Dashboard renders the fixture contract files from `data/exports/` with no network.
+- Dashboard renders the fixture contract files from `dashboard/public/data/`
+  (`latest.json`, `history.json`, `xirr.json`, `alerts.json`) with no network.
 
 ## Reporting back (you are orchestrated)
 You were launched by the **orchestrator**. When finished, reply with exactly this shape so

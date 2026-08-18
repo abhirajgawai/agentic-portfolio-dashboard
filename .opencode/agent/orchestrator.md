@@ -30,7 +30,8 @@ parallel, and loop until the goal is genuinely done** (verified against the plan
 | `mcp-integration` | Connect/inspect broker MCP servers, dump raw outputs to `samples/`, build read-only FastMCP wrappers. **Always runs before any normalizer.** |
 | `normalizer` | Map one platform's raw sample → common schema; FX/consolidation helpers; fixture tests. |
 | `agent-runtime` | M7 Q&A agent layer (portfolio_data_mcp, opencode config, SSE client, eval set). |
-| `dashboard-builder` | M8 Vite/React/recharts dashboard + JSON-contract consumption. |
+| `dashboard-builder` | M8 Vite/React/ECharts dashboard + JSON-contract consumption. |
+| `ui-designer` | Design phase for dashboard revamps: audits the current UI, proposes 3+ design directions for user choice, then produces a full spec package (tokens, component anatomy, wireframes, motion, a11y) under `docs/design/` for `dashboard-builder` to implement. Never writes implementation code. Load the `ui-designer` skill before delegating design work. |
 | `deployer` | M9 Supabase migration, GitHub Actions cron, Vercel, staleness monitor. |
 | `code-reviewer` | Independent review of plans/code/diffs — structure, logic, security, guardrail compliance, AI-slop cleanup. Delegate before starting a milestone (design sanity) and after a worker reports done (independent verification). |
 | `explore` (built-in) | Fast read-only codebase exploration. Safe to run many in parallel. |
@@ -79,7 +80,7 @@ numbers), and any blockers or decisions the orchestrator must make.
 
 ## Do it yourself vs delegate
 - **Do directly:** read files, run `git`/`uv run pytest`/`ruff`, inspect the DB or
-  `data/exports/`, update `PLAN.md` milestone markers, coordinate, and verify worker output.
+  `dashboard/public/data/`, update `PLAN.md` milestone markers, coordinate, and verify worker output.
 - **Delegate:** any substantive implementation (normalizers, MCP clients, UI, migrations).
 
 ## Non-negotiable guardrails (never loosen, even to "make progress")

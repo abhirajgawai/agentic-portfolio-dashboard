@@ -88,7 +88,8 @@ itself rather than trusting a worker's self-report.
 | `mcp-integration` | subagent | MCP connect/inspect, `samples/` capture, FastMCP wrappers |
 | `normalizer` | subagent | raw sample → common schema, FX/consolidation helpers |
 | `agent-runtime` | subagent | M7 Q&A agent layer |
-| `dashboard-builder` | subagent | M8 dashboard |
+| `dashboard-builder` | subagent | M8 dashboard + M8.5 revamp implementation |
+| `ui-designer` | subagent | Dashboard UX/UI design: audit → design directions (user picks) → spec package (`docs/design/spec/`) → hands off to `dashboard-builder`; reviews implementation for design fidelity |
 | `deployer` | subagent | M9 deployment |
 | `code-reviewer` | all | independent review of plans/code/diffs — structure, logic, security, guardrail compliance, AI-slop cleanup; verdict at milestone gates |
 
@@ -105,6 +106,13 @@ Rules of the topology:
 
 ## Verification
 
+- **Before any commit, check `.gitignore` is updated.** Run `git status` and
+  confirm nothing personal or stray would be pushed: `data/tokens.json`,
+  `data/*.db*`, `data/logs/`, `data/cas/`, `data/properties/`,
+  `dashboard/public/data/`, authed samples, and botched artifacts like
+  `dashboard/@/`. If new data files are created by a feature, add them to
+  `.gitignore` FIRST (guardrail #2 — never commit credentials, addresses, PANs,
+  or live portfolio values). Only then stage intended files explicitly.
 - `uv run ruff check .` and `uv run pytest` before declaring work done.
 - **Tests are written only when they earn their place.** Do not blanket-add unit
   tests for every new function or refactor. Write a test when it guards something

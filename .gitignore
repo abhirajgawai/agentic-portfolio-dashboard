@@ -27,6 +27,9 @@ dashboard/public/data/
 data/cas/
 samples/cas/*_raw.json
 
+# Real-estate property valuations (manual entries carry PII: address, prices).
+data/properties/
+
 # Raw samples that accidentally captured credentials. Safe/pinned samples
 # (holdings/quotes only, tokens redacted) ARE committed for regression.
 samples/*_token*
@@ -41,6 +44,10 @@ samples/**/*_authed.json
 scripts/*.bat.tmp
 Thumbs.db
 .DS_Store
+
+# Botched `shadcn add` artifact — an `@/components/ui/` copy that duplicates
+# dashboard/src/components/ui/. Real components live under dashboard/src/.
+dashboard/@/
 
 # ---- opencode node_modules (its own .gitignore also covers this) ----
 .opencode/node_modules/

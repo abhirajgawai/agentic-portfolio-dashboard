@@ -1,6 +1,6 @@
-# Features — Milestones M0 through M6
+# Features — Milestones M0 through M8.5
 
-Everything built so far (as of 2026-08-17). Source of truth: `PLAN.md` (the plan)
+Everything built so far (as of 2026-08-18). Source of truth: `PLAN.md` (the plan)
 and the code itself — this file is the readable inventory. Every milestone passed
 its independent review gate (code-reviewer verdict APPROVE) before advancing.
 
@@ -14,7 +14,10 @@ its independent review gate (code-reviewer verdict APPROVE) before advancing.
 | M4 Scheduling + calendars | ✅ DONE 2026-08-07 | APPROVE |
 | M5 Returns & XIRR | ✅ DONE 2026-08-17 | APPROVE |
 | M6 Alerts (rule-based) | ✅ DONE 2026-08-17 | APPROVE |
-| M7 Q&A agent · M8 Dashboard · M9 Deploy | ⏳ pending | — |
+| M7 Q&A agent | ✅ DONE 2026-08-17 | APPROVE |
+| M8 Dashboard + UI design | ✅ DONE 2026-08-17 | APPROVE |
+| M8.5 Real-estate property leg | ✅ DONE 2026-08-18 | — (adopted, not gated) |
+| M9 Deploy | ⏳ pending | — |
 
 ---
 
@@ -196,6 +199,90 @@ its independent review gate (code-reviewer verdict APPROVE) before advancing.
   proven). Telegram delivery is the graceful-drop path until the token env vars are
   set (the "notifies" leg is pinned by tests with a mock).
 
+## M7 — Q&A agent (read-only, allowlisted)
+
+- **`portfolio_data_mcp/`** — read-only FastMCP server: 6 SELECT-only tools
+  (`latest_snapshot`, `allocation_summary`, `holding_history`, `portfolio_total`,
+  `recent_runs`, `fired_alerts`) over SQLite, opened `mode=ro` (filesystem-level
+  write lock — test-proven), bounded/validated inputs, never accepts raw SQL,
+  registers no write tools.
+- **`.opencode/opencode.json` — the two-layer allowlist (guardrails #1 + #2):**
+  MCP servers `kite` (hosted), `moomoo` (hosted, OAuth via `opencode mcp auth`),
+  `portfolio_data` (local). Global `tools` deny-by-default (`kite_*`,
+  `moomoo_*`, `portfolio_data_*` = false) + explicit belts for every destructive
+  pattern (verified against the captured 88-tool Moomoo inventory). The
+  `portfolio-analyst` agent (steps 15, temp 0.2) re-enables ONLY
+  `portfolio_data_*`, `kite_get_*`, `moomoo_quote_*`, `moomoo_account_*` — no
+  filesystem/shell/web tools (can't reach `data/tokens.json`), and answers are
+  additionally swept through `logging.redact_text()` before returning.
+- **`src/portfolio/agent/client.py` + `portfolio ask`** — async opencode-serve
+  client: POST /session → prompt_async → stream the global `/event` SSE bus →
+  final answer; **budget enforced client-side** (maxTurns + wall-clock, both fire
+  `POST /session/:id/abort`); every tool call + redacted args appended to
+  gitignored `data/logs/agent_audit.jsonl` (the eval's evidence).
+- **`scripts/eval_agent.py` — 16 questions** (9 data, 3 multi-hop, 1 exact-number
+  = ₹18,71,628.35 within 2%, 2 refusal probes, 1 big listing); spawns/kills its
+  own `opencode serve`, loads the allowlist from the LIVE config, replays the
+  audit file, fnmatch-asserts every executed tool.
+- **Verified:** eval 16/16 PASS within budget, 23 tool calls / 6 unique tools —
+  all allowlisted, zero non-allowlisted; refusal probes → 0 tool calls.
+
+## M8 — Dashboard (Vite + React + ECharts + shadcn/ui)
+
+- **Stack (user-approved after research — `docs/DASHBOARD_PLAN.md`):** Vite 8 +
+  React 19 SPA, TypeScript strict, Tailwind v4 + shadcn/ui v4 (dark,
+  Linear/Vercel aesthetic), **Apache ECharts** via `echarts/core` modular imports
+  (donuts, area/line, bars — dual-axis/dataZoom/candles-ready), TanStack Query +
+  TanStack Table v8 + Zod v4. NOT the original recharts sketch (no
+  zoom/dual-axis/candlesticks).
+- **Two paths, deliberately separate (determinism boundary):**
+  1. **Dashboard (deterministic, no LLM):** renders the four JSON exports
+     (`dashboard/public/data/{latest,history,xirr,alerts}.json`) through **Zod
+     schemas = THE contract** (one typed client; `npm run check:contract`
+     validates the real files). "Refresh now" → `POST /api/refresh` → the real
+     pipeline CLI (`snapshot --all --force` + `export_json.py`) → JSONs
+     regenerated → TanStack Query invalidates.
+  2. **Chat panel (agentic):** right drawer → `POST /api/ask` → M7 client →
+     answer + tool-call chips + honest "agent offline" state; the dashboard never
+     depends on it.
+- **`src/portfolio/bridge.py`** (FastAPI, loopback-only, CORS for the Vite
+  origin): `GET /api/health` · `POST /api/refresh` ({ok, summary} | clean 502) ·
+  `POST /api/ask` ({answer, toolCalls, turns, withinBudget} | clean 503 when
+  opencode serve is down). Never touches broker MCPs or the DB directly —
+  shells out to the real CLI.
+- **Screens (6 tabs):** Overview (cards, 4 ECharts donuts, value-over-time,
+  staleness badges, alerts chip) · India view · US view · Returns · Alerts ·
+  Chat drawer. Loading/error/offline/empty states everywhere; dark theme;
+  ₹-formatted.
+- **Verified:** `npm run build` green (app 155KB + echarts 620KB split chunk);
+  typecheck + lint clean; `check:contract` parses the real exports (68 holdings,
+  allocSum 100.00%); live `POST /api/refresh` pulled zerodha 35 + moomoo 6 and
+  regenerated all 4 JSONs; `POST /api/ask` answered real questions via
+  allowlisted `portfolio_data_*` tools within budget; server down → clean 503.
+- **M8.5 revamp (design-track, spec complete 2026-08-18, implementation
+  pending):** user picked the Hybrid 1+2 direction — full spec package in
+  `docs/design/spec/` (spec.md, tokens.json, rationale, motion, a11y) produced by
+  the `ui-designer` agent; `dashboard-builder` implements from it. Contract stays
+  immutable.
+
+## M8.5 — Real-estate property leg (unplanned, adopted 2026-08-18)
+
+- **`portfolio property import`** — `src/portfolio/property_import.py`: a manual
+  valuation entry for real estate (MVP). Property JSON (gitignored
+  `data/properties/` — carries address/valuations = PII) → one holding
+  (`platform=real_estate`, `asset_class=real_estate`) + trade rows for XIRR
+  (purchase outflow, each improvement outflow, terminal as-if-sold inflow on the
+  valuation date). Idempotent via `external_id` dedupe; full run audit
+  (`running → ok/error`) through the shared `persist`/`writer` plumbing.
+- **Bridge + UI** — `POST /api/property/import` + `DELETE /api/property/{id}` in
+  `src/portfolio/bridge.py` (shells out to the real CLI, temp-file JSON, 60s
+  timeout, clean 502 mapping); new **Properties tab** (`PropertiesScreen.tsx`,
+  `Home` icon) + `radix-ui` dep. One-off exception: Property Zod schemas added to
+  the (normally immutable) `contract.ts` — future contract changes must route
+  through design review.
+- **Verified** — live run against `PROP_BLR_001.json` persisted holding + trades;
+  166 passed / 2 skipped, ruff clean on feature code.
+
 ---
 
 ## Cross-cutting (every milestone)
@@ -221,13 +308,14 @@ its independent review gate (code-reviewer verdict APPROVE) before advancing.
 A machine that, every trading day hands-free: captures both broker portfolios
 (35 zerodha + 6 moomoo holdings, live-verified 2026-08-17), converts to one ₹ view,
 freezes the daily ledger, captures trades, reprices CAS MFs/ETFs, computes
-returns/XIRR, evaluates alert rules, and exports everything the M8 dashboard will
-render — every step gated by the market calendar and every outcome (ok / skipped /
-error) visible in the `runs` audit trail.
+returns/XIRR, evaluates alert rules, and exports everything the M8 dashboard
+renders — every step gated by the market calendar and every outcome (ok / skipped /
+error) visible in the `runs` audit trail. On top of that: a read-only Q&A agent
+(allowlisted MCP tools, turn budgets, audit trail) and a Vite dashboard with
+live refresh + chat bridge.
 
 ## Next
 
-M7 — Q&A agent (read-only `portfolio_data_mcp` + opencode config with tool allowlist
-+ SSE client with turn budgets + eval set) → M8 — Dashboard → M9 — Deploy (Supabase,
-GitHub Actions cron, Vercel, staleness monitor; host options A/B/C for the
-no-always-on-laptop constraint).
+M9 — Deploy (Supabase, GitHub Actions cron, Vercel, staleness monitor; host
+options A/B/C for the no-always-on-laptop constraint), and the M8.5 dashboard
+revamp implementation (spec ready in `docs/design/spec/`).

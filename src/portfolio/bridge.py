@@ -32,6 +32,7 @@ import sys
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
 from portfolio.agent.client import OpenCodeClient
 from portfolio.config import ROOT_DIR
@@ -139,6 +140,197 @@ async def refresh() -> JSONResponse:
         # UI shows the readable failure detail instead of rejecting the payload.
         return JSONResponse(status_code=502, content={"ok": False, "error": json.dumps(summary, default=str)})
     return JSONResponse(content={"ok": True, "summary": summary})
+
+
+class PropertyImportRequest(BaseModel):
+    """Request body for property import from UI."""
+    property_id: str
+    address: str
+    property_type: str = "residential"
+    purchase_date: str  # YYYY-MM-DD
+    purchase_price: float
+    current_valuation: float
+    valuation_date: str | None = None  # YYYY-MM-DD, defaults to today
+    improvements: list[dict] = []  # [{date, amount, description}]
+
+
+@app.post("/api/property/import")
+async def property_import(req: PropertyImportRequest) -> JSONResponse:
+    """Import or update a property valuation from the UI.
+
+    Runs `portfolio property import` with the provided JSON, then regenerates
+    the dashboard exports. Idempotent: re-importing the same property_id with
+    a new current_valuation updates the holding + adds a new terminal trade.
+    """
+    import json as jsonlib
+    import subprocess
+    import sys
+    import tempfile
+
+    # Build the property JSON from the request
+    prop_json = {
+        "property_id": req.property_id,
+        "address": req.address,
+        "property_type": req.property_type,
+        "purchase_date": req.purchase_date,
+        "purchase_price": req.purchase_price,
+        "current_valuation": req.current_valuation,
+        "improvements": req.improvements,
+    }
+
+    # Write to a temp file and run the CLI import
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            jsonlib.dump(prop_json, f)
+            temp_path = f.name
+
+        # Run property import CLI
+        import_result = subprocess.run(
+            [sys.executable, "-m", "portfolio.cli", "property", "import", temp_path],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            cwd=ROOT_DIR,
+        )
+
+        if import_result.returncode != 0:
+            logger.error("property import failed: %s", import_result.stderr)
+            return JSONResponse(
+                status_code=502,
+                content={"ok": False, "error": f"import failed: {import_result.stderr[-500:]}"},
+            )
+
+        # Regenerate dashboard exports
+        export_result = subprocess.run(
+            [sys.executable, "scripts/export_json.py"],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            cwd=ROOT_DIR,
+        )
+
+        if export_result.returncode != 0:
+            logger.error("export_json failed: %s", export_result.stderr)
+            return JSONResponse(
+                status_code=502,
+                content={"ok": False, "error": f"export failed: {export_result.stderr[-500:]}"},
+            )
+
+        return JSONResponse(
+            content={
+                "ok": True,
+                "import": import_result.stdout.strip()[-2000:],
+                "export": export_result.stdout.strip()[-2000:],
+            }
+        )
+    except subprocess.TimeoutExpired:
+        logger.error("property import timed out")
+        return JSONResponse(status_code=502, content={"ok": False, "error": "import timed out"})
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("property import failed")
+        return JSONResponse(status_code=502, content={"ok": False, "error": f"{type(exc).__name__}: {exc}"})
+
+
+class PropertyDeleteRequest(BaseModel):
+    """Request body for property deletion."""
+    property_id: str
+
+
+@app.delete("/api/property/{property_id}")
+async def property_delete(property_id: str) -> JSONResponse:
+    """Delete a property and all its data from the DB.
+
+    Removes the holding (position), position_snapshots, price_history,
+    instrument, account, and trades for the given property_id.
+    Then regenerates dashboard exports.
+    """
+    import subprocess
+    import sys
+
+    try:
+        # Run a Python script to delete the property from DB
+        delete_script = f"""
+import sys
+sys.path.insert(0, r'{ROOT_DIR}')
+from portfolio.db import connect
+from portfolio.config import DB_PATH
+
+db = connect(DB_PATH)
+try:
+    # Find the instrument_id for this property
+    inst = db.execute(
+        "SELECT id FROM instrument WHERE platform='real_estate' AND ticker=?",
+        ('{property_id}',)
+    ).fetchone()
+    if not inst:
+        print(f"Property {property_id} not found")
+        sys.exit(0)
+    inst_id = inst['id']
+
+    # Find the account_id
+    acc = db.execute(
+        "SELECT id FROM account WHERE platform='real_estate' AND account_ref='folio'"
+    ).fetchone()
+    if not acc:
+        print(f"Account not found")
+        sys.exit(0)
+    acc_id = acc['id']
+
+    # Delete in correct order (FK constraints)
+    db.execute("DELETE FROM trade WHERE account_id=? AND instrument_id=?", (acc_id, inst_id))
+    db.execute("DELETE FROM position_snapshot WHERE account_id=? AND instrument_id=?", (acc_id, inst_id))
+    db.execute("DELETE FROM price_history WHERE instrument_id=?", (inst_id,))
+    db.execute("DELETE FROM position WHERE account_id=? AND instrument_id=?", (acc_id, inst_id))
+    db.execute("DELETE FROM instrument WHERE id=?", (inst_id,))
+    db.commit()
+    print(f"Deleted property {property_id}")
+finally:
+    db.close()
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", delete_script],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            cwd=ROOT_DIR,
+        )
+
+        if result.returncode != 0:
+            logger.error("property delete failed: %s", result.stderr)
+            return JSONResponse(
+                status_code=502,
+                content={"ok": False, "error": f"delete failed: {result.stderr[-500:]}"},
+            )
+
+        # Regenerate dashboard exports
+        export_result = subprocess.run(
+            [sys.executable, "scripts/export_json.py"],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            cwd=ROOT_DIR,
+        )
+
+        if export_result.returncode != 0:
+            logger.error("export_json failed: %s", export_result.stderr)
+            return JSONResponse(
+                status_code=502,
+                content={"ok": False, "error": f"export failed: {export_result.stderr[-500:]}"},
+            )
+
+        return JSONResponse(
+            content={
+                "ok": True,
+                "deleted": property_id,
+                "export": export_result.stdout.strip()[-2000:],
+            }
+        )
+    except subprocess.TimeoutExpired:
+        logger.error("property delete timed out")
+        return JSONResponse(status_code=502, content={"ok": False, "error": "delete timed out"})
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("property delete failed")
+        return JSONResponse(status_code=502, content={"ok": False, "error": f"{type(exc).__name__}: {exc}"})
 
 
 @app.post("/api/ask")

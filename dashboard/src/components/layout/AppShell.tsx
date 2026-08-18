@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Activity, Bell, ChartLine, Eye, EyeOff, Globe2, Landmark, LayoutDashboard, MessageSquare } from 'lucide-react'
+import { Activity, Bell, ChartLine, Eye, EyeOff, Globe2, Home, Landmark, LayoutDashboard, MessageSquare } from 'lucide-react'
 
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { StatusBar } from '@/components/layout/StatusBar'
@@ -8,17 +8,19 @@ import { IndiaView } from '@/components/holdings/IndiaView'
 import { USView } from '@/components/holdings/USView'
 import { ReturnsScreen } from '@/components/returns/ReturnsScreen'
 import { AlertsScreen } from '@/components/alerts/AlertsScreen'
+import { PropertiesScreen } from '@/components/holdings/PropertiesScreen'
 import { ChatDrawer } from '@/components/chat/ChatDrawer'
 import { useAlerts, useLatest } from '@/lib/data'
 import { usePrivacy } from '@/lib/privacy'
 import { cn } from '@/lib/utils'
 
-type TabId = 'overview' | 'india' | 'us' | 'returns' | 'alerts'
+type TabId = 'overview' | 'india' | 'us' | 'returns' | 'alerts' | 'properties'
 
 const TABS: Array<{ id: TabId; label: string; icon: typeof LayoutDashboard }> = [
   { id: 'overview', label: 'Overview', icon: LayoutDashboard },
   { id: 'india', label: 'India', icon: Landmark },
   { id: 'us', label: 'US', icon: Globe2 },
+  { id: 'properties', label: 'Properties', icon: Home },
   { id: 'returns', label: 'Returns', icon: ChartLine },
   { id: 'alerts', label: 'Alerts', icon: Bell },
 ]
@@ -116,6 +118,7 @@ export function AppShell() {
             {tab === 'overview' && <OverviewScreen />}
             {tab === 'india' && <IndiaView />}
             {tab === 'us' && <USView />}
+            {tab === 'properties' && <PropertiesScreen />}
             {tab === 'returns' && <ReturnsScreen />}
             {tab === 'alerts' && <AlertsScreen />}
           </div>

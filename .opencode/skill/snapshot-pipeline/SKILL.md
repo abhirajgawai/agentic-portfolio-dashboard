@@ -21,8 +21,8 @@ A run collects holdings from all platforms into a single point-in-time snapshot.
    shared by all rows in the run (determinism: same `run_at` → same rows).
 7. **Log** a row in `runs`: `run_id, started_at, completed_at, status
    (success|partial|failed), platforms_collected, rows_count, fx_rate, triggered_by`.
-8. **Export** JSON contract to `data/exports/` (see PLAN.md §5/M8): `latest.json`,
-   `history.json`, `allocation.json`, `xirr.json`, `alerts.json`.
+8. **Export** JSON contract to `dashboard/public/data/` (see PLAN.md §5/M8): `latest.json`,
+   `history.json`, `xirr.json`, `alerts.json`.
 
 ## CLI
 - `uv run portfolio snapshot [--platform zerodha|moomoo|all] [--eod]`

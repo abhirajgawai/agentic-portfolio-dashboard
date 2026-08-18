@@ -52,6 +52,7 @@ PLATFORMS: dict[str, dict[str, str]] = {
     "groww": {"geography": "IN", "currency": "INR", "display_currency": "INR"},
     "sharekhan": {"geography": "IN", "currency": "INR", "display_currency": "INR"},
     "moomoo": {"geography": "US", "currency": "USD", "display_currency": "SGD"},
+    "real_estate": {"geography": "IN", "currency": "INR", "display_currency": "INR"},
 }
 
 
