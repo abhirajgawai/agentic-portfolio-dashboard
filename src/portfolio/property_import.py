@@ -22,7 +22,11 @@ Property JSON format (manual entry, gitignored data/properties/):
 Cash flows generated for XIRR (signed: +buy/-sell convention in trade.amount_ccy):
   - Purchase: -purchase_price on purchase_date
   - Each improvement: -amount on improvement date
-  - Terminal: +current_valuation on valuation_date (today)
+  - Terminal: NOT written as a trade - the generic account_xirrs terminal
+    (sum of the position's current value, dated today) represents the
+    as-if-sold inflow. Writing a terminal trade too would count the same
+    liquidation twice (bug found 2026-08-18: TALOJA_PROPERTY showed 18.06%
+    XIRR instead of ~2.46%) and would go stale when the property is re-valued.
 
 Mortgage support is Phase 2 (future): mortgage table + amortization trades.
 """
@@ -55,8 +59,6 @@ def _to_float(value: Any) -> float | None:
 
 def build_holding_and_trades(
     prop: dict[str, Any],
-    *,
-    valuation_date: str | None = None,
 ) -> tuple[Holding, list[dict[str, Any]]]:
     """Convert property JSON to a Holding + list of trade dicts for XIRR.
 
@@ -73,10 +75,6 @@ def build_holding_and_trades(
 
     if not all([property_id, address, purchase_date, purchase_price is not None, current_valuation is not None]):
         raise ValueError("property JSON missing required fields: property_id, address, purchase_date, purchase_price, current_valuation")
-
-    # Valuation date defaults to today (Kolkata date for consistency with CAS)
-    if valuation_date is None:
-        valuation_date = datetime.now(UTC).astimezone().date().isoformat()
 
     # --- Build Holding ---
     # Use property_id as ticker (maps to instrument.ticker)
@@ -103,7 +101,9 @@ def build_holding_and_trades(
     # XIRR solver expects flows = -amount_ccy (buy = outflow, sell = inflow)
     # So purchase (outflow) -> amount_ccy = +purchase_price
     # Improvement (outflow) -> amount_ccy = +amount
-    # Terminal (as-if-sold, inflow) -> amount_ccy = -current_valuation
+    # NO terminal trade: account_xirrs adds the position value (current
+    # valuation) as the terminal inflow - writing one here would double-count
+    # the liquidation (fixed 2026-08-18).
     trades: list[dict[str, Any]] = []
 
     # Purchase trade
@@ -130,16 +130,6 @@ def build_holding_and_trades(
                 "external_id": f"improvement_{property_id}_{i+1}",
             })
 
-    # Terminal trade (as-if-sold on valuation date)
-    trades.append({
-        "trade_date": valuation_date,
-        "quantity": -1.0,  # liquidate the 1 unit
-        "price": current_valuation,
-        "amount_ccy": -current_valuation,  # -ve = sell (inflow to investor pocket)
-        "currency": "INR",
-        "external_id": f"terminal_{property_id}_{valuation_date}",
-    })
-
     return holding, trades
 
 
@@ -164,7 +154,7 @@ def import_property(
     if valuation_date is None:
         valuation_date = datetime.now(UTC).astimezone().date().isoformat()
 
-    holding, trades = build_holding_and_trades(prop, valuation_date=valuation_date)
+    holding, trades = build_holding_and_trades(prop)
 
     db = connect(db_path)
     try:

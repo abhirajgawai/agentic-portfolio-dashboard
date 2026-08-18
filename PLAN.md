@@ -646,9 +646,11 @@ Tokens live in `data/tokens.json` (gitignored), never in the DB or snapshots.
 - **`src/portfolio/property_import.py` + `portfolio property import`** — a property
   JSON (gitignored `data/properties/`, carries address/valuations = PII) → one
   holding (`platform=real_estate`, `asset_class=real_estate`) + trade rows for
-  XIRR (purchase outflow, each improvement outflow, terminal as-if-sold inflow on
-  valuation date); idempotent via `external_id` dedupe; full run audit
-  (`running → ok/error`).
+  XIRR (purchase outflow + each improvement outflow; the terminal as-if-sold
+  inflow is DERIVED from the position value by `account_xirrs` — writing it as
+  a trade double-counted the liquidation, fixed 2026-08-18: TALOJA_PROPERTY
+  showed 18.06% XIRR vs the honest ~2.46%); idempotent via `external_id` dedupe;
+  full run audit (`running → ok/error`).
 - **Bridge + UI:** `POST /api/property/import` + `DELETE /api/property/{id}` in
   `src/portfolio/bridge.py` (shells out to the real CLI, temp-file JSON, 60s
   timeout, clean 502 mapping); new "Properties" tab (`PropertiesScreen.tsx`,
@@ -659,6 +661,70 @@ Tokens live in `data/tokens.json` (gitignored), never in the DB or snapshots.
 - ✅ Done when: `portfolio property import data/properties/PROP_BLR_001.json`
   persists holding + trades and the Properties tab renders it from the exported
   JSON (verified live by the implementing session).
+
+### M8.6 — Daily performance tracker (adopted 2026-08-18, gate: APPROVE)
+- **Question it answers:** "what is my day P&L, my return, and *why* did value
+  move?" — a daily performance + attribution layer over the existing
+  `position_snapshot` ledger, exposed three ways: a materialized
+  `daily_performance` table (full rebuild at export), a 5th JSON contract file
+  (`performance.json`), and a read-only MCP tool for the M7 agent.
+- **`src/portfolio/performance.py` (engine, pure/read-only):** an **interval
+  rule** per (account, instrument) across consecutive ledger rows — no previous
+  row = `first_appearance` revaluation; gap ≤ 7 days = genuine **daily move**
+  (goes into `dayPnlBase` + attribution); gap > 7 days = **revaluation event**
+  (kind `property` / `cas_import` / `other` + `intervalDays`), so a month-old
+  CAS re-price or a property revaluation is NEVER mislabeled a one-day crash
+  (the M-3 mixed-frequency honesty problem solved for P&L). Broker day P&L is a
+  **separate** measure: each row's `day_change_ccy` → base via that row's own
+  frozen `market_value_base/market_value_ccy` ratio (no second FX fetch, no FX
+  noise); only live legs (zerodha/moomoo) carry it, per-platform in
+  `brokerDayPnl`. Attribution (`byGeography`/`byPlatform`/`byAssetClass`) is a
+  partition of the same per-holding daily moves — Σ each ≈ `dayPnlBase` (the
+  M3.5 reconciliation invariant extended to P&L; check:contract asserts it).
+  XIRR reuses the M5 reader with the same injected `today` (point-in-time, no
+  per-day XIRR series — designed out). Determinism: `today` injected (never a
+  clock read; naive datetimes refused loudly), sorted keys, 2dp rounding.
+- **Migration 0010** (`db/migrations/0010_daily_performance.sql`,
+  `PRAGMA user_version = 10` — 0009 was already owned by the untracked
+  `0009_backfill_display_names.sql`): `daily_performance(perf_date,
+  scope_type in all|geography|platform|asset_class|currency, scope_key, ...
+  UNIQUE(perf_date, scope_type, scope_key))` with `fx_rate_id` referencing
+  `fx_rate(id)` (kept for the deferred price-vs-FX attribution split).
+  **`rebuild_table` = DELETE-all + INSERT from the engine's private `_scopes`**
+  — the engine is the single source of truth, the table can never drift from
+  the payload (the M3.5 "derive, never incrementally write" rule). `export_json.py`
+  now calls `migrate()` on fresh DBs and runs the performance block as CORE
+  (after latest/history/xirr/alerts are written, so a failure never loses them).
+- **Dashboard:** new "Performance" tab (`PerformanceScreen.tsx`, TrendingUp,
+  after Properties before Returns) — cards (day P&L, simple return + cost
+  coverage, XIRR), dual-axis chart (day-P&L bars + value line),
+  simple-return line, attribution bars, top movers, revaluation events, daily
+  table; `PerformanceSchema` added to `contract.ts` (additive only),
+  `loadPerformance()`/`usePerformance()` in `data.ts`, `check-contract.ts` now
+  validates 5 files + the attribution invariant. 5th export file
+  `dashboard/public/data/performance.json` `{asOf, daily:[...], xirr}` — pinned
+  shape per day: `{date, valueBase, dayPnlBase, brokerDayPnl,
+  dayPnlPct, simpleReturnPct, costCoverage, attribution, topMovers,
+  revaluationEvents}`.
+- **M7 tool:** 7th read-only MCP tool `daily_performance(date_from, date_to,
+  scope_type, scope_key, limit)` in `portfolio_data_mcp/server.py` (SELECT-only,
+  `mode=ro`, clamped limit, structured errors, graceful "migration not applied
+  yet" note on a fresh DB).
+- ✅ Done when: `performance.json` reconciles with the ledger (attribution Σ ==
+  dayPnlBase) and the tab renders it. **Verification:** ruff clean; `uv run
+  pytest` **188 passed / 2 skipped** (15 engine tests: mixed-frequency fixture,
+  revaluation bucket, reconciliation invariant, broker day P&L presence,
+  determinism, idempotent rebuild, migration 10); `npm run build` clean +
+  `npm run check:contract` parses all 5 live files (attribution drift 0.00 on
+  latest, ≤0.02 elsewhere); live `performance.json` has 6 days (06-30 …
+  08-18), 47 scope rows, real numbers (08-13 +₹1,484 · 08-17 −₹7,574.92; 06-30
+  revaluations = `first_appearance` for the CAS MFs). **Honesty note:** the
+  latest day (08-18) shows `dayPnlBase=0` because the only ledger row dated
+  08-18 is the property's first appearance — the live legs' 08-18 EOD snapshot
+  hadn't run at export time (`latest.json`'s day P&L comes from broker live
+  state, a different view). **Deferred (designed for via `fx_rate_id`, not
+  built):** price-vs-FX attribution split, weekly/monthly rollups, flow-adjusted
+  TWRR.
 
 ### M9 — Deployment (2–3 evenings)
 - Migrate SQLite → Supabase (schema ports 1:1) — the shared spine: local legs and cloud

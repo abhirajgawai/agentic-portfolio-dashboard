@@ -11,13 +11,13 @@ THE READ-ONLY CONTRACT
   and only the bound values come from the tool arguments.
 * This server is part of the DETERMINISM BOUNDARY (AGENTS.md guardrail #4): it
   computes views over the already-written pipeline data (position,
-  position_snapshot, runs, alert_events) and returns plain JSON. No LLM output
-  flows into it and it never changes the underlying data - the agent reads,
-  never writes.
+  position_snapshot, runs, alert_events, daily_performance) and returns plain
+  JSON. No LLM output flows into it and it never changes the underlying data -
+  the agent reads, never writes.
 
 Why a dedicated server instead of letting the agent hit SQLite directly? The
 agent's opencode config allowlists MCP tools by name; a local MCP server is the
-only way to expose a *curated, bounded, read-only* surface (6 tools) with the
+only way to expose a *curated, bounded, read-only* surface (7 tools) with the
 SQL hidden behind named tool calls. Moomoo's wrapper (moomoo_mcp/server.py)
 shows the same pattern: our own FastMCP server, read tools only.
 
@@ -31,6 +31,7 @@ hits the same quirk; wrapping in a dict keeps each result ONE JSON object).
 from __future__ import annotations
 
 import logging
+import re
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -79,6 +80,82 @@ def _opt_str(value: Any, *, upper: bool = False) -> str | None:
     if not text:
         return None
     return text.upper() if upper else text
+
+
+# The rebuild's scope vocabulary (performance.py writes exactly these).
+PERF_SCOPE_TYPES = {"all", "geography", "platform", "asset_class", "currency"}
+# Optional date filters are validated to YYYY-MM-DD before they touch SQL -
+# a malformed string can never silently match nothing via BETWEEN.
+_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+# The SELECT column list, shared by the tool and the SQL (never caller input).
+PERF_COLUMNS = (
+    "perf_date, scope_type, scope_key, value_base, day_pnl_base,"
+    " broker_day_pnl_base, day_pnl_pct, simple_return_pct,"
+    " cost_with, cost_without, rebuilt_at"
+)
+
+
+def _check_date(label: str, value: Any) -> str | None:
+    """Validate an optional YYYY-MM-DD filter; None when absent (bounded input)."""
+    text = _opt_str(value)
+    if text is not None and _DATE_RE.match(text) is None:
+        raise ValueError(f"{label} must be a YYYY-MM-DD date string, got {value!r}")
+    return text
+
+
+def _round2(value: float | None) -> float | None:
+    """Round a (possibly NULL) REAL column to 2dp for the agent-facing envelope."""
+    return None if value is None else round(value, 2)
+
+
+def _perf_rows(
+    *,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    scope_type: str | None = None,
+    scope_key: str | None = None,
+    limit: int = DEFAULT_LIMIT,
+) -> list[dict[str, Any]]:
+    """Daily performance ledger rows, filtered, date/scope-ordered."""
+    where, params = ["1=1"], []
+    if date_from is not None and date_to is not None:
+        where.append("perf_date BETWEEN ? AND ?")
+        params.extend([date_from, date_to])
+    elif date_from is not None:
+        where.append("perf_date >= ?")
+        params.append(date_from)
+    elif date_to is not None:
+        where.append("perf_date <= ?")
+        params.append(date_to)
+    if scope_type is not None:
+        where.append("scope_type = ?")
+        params.append(scope_type)
+    if scope_key is not None:
+        where.append("LOWER(scope_key) = LOWER(?)")
+        params.append(scope_key)
+    params.append(_clamp(limit))
+    sql = f"""
+        SELECT {PERF_COLUMNS}
+        FROM daily_performance
+        WHERE {' AND '.join(where)}
+        ORDER BY perf_date, scope_type, scope_key
+        LIMIT ?
+    """
+    with _connect() as conn:
+        rows = conn.execute(sql, params).fetchall()
+    out: list[dict[str, Any]] = []
+    for r in rows:
+        row = dict(r)
+        for col in (
+            "value_base",
+            "day_pnl_base",
+            "broker_day_pnl_base",
+            "day_pnl_pct",
+            "simple_return_pct",
+        ):
+            row[col] = _round2(row[col])
+        out.append(row)
+    return out
 
 
 def _platform_ok(platform: str | None) -> str | None:
@@ -408,6 +485,70 @@ def fired_alerts(limit: int = 10, severity: str | None = None) -> dict[str, Any]
     except sqlite3.Error as exc:
         return _error(str(exc))
     return {"count": len(rows), "alerts": [dict(r) for r in rows]}
+
+
+@server.tool()
+def daily_performance(
+    date_from: str | None = None,
+    date_to: str | None = None,
+    scope_type: str | None = None,
+    scope_key: str | None = None,
+    limit: int = DEFAULT_LIMIT,
+) -> dict[str, Any]:
+    """Daily performance per date/scope: value, day P&L, returns.
+
+    Reads the REBUILT performance ledger (`daily_performance`, written by the
+    M8.6 table rebuild at export time) - one row per (perf_date, scope_type,
+    scope_key). Each row carries value_base (portfolio value in the base
+    currency, INR), day_pnl_base (that day's interval-rule daily move),
+    broker_day_pnl_base (broker-reported day P&L when the scope has one, else
+    null), day_pnl_pct, simple_return_pct and the cost-basis coverage counts
+    cost_with / cost_without. This answers "what drove the drop last week" by
+    comparing scopes across dates. Optional exact filters: date_from / date_to
+    (YYYY-MM-DD, inclusive; a malformed date is a structured error), scope_type
+    (all|geography|platform|asset_class|currency - anything else is a
+    structured error), scope_key (case-insensitive; e.g. IN|US, zerodha,
+    equity). Ordered by (perf_date, scope_type, scope_key), limited to `limit`
+    (max 500). Returns {rows: [...], count, note}; note is null normally and
+    set only when the ledger table is not available yet (migration not applied)
+    - an empty, graceful result, never a crash. Read-only.
+    """
+    try:
+        d_from = _check_date("date_from", date_from)
+        d_to = _check_date("date_to", date_to)
+        scope = _opt_str(scope_type)
+        if scope is not None:
+            scope = scope.lower()
+            if scope not in PERF_SCOPE_TYPES:
+                return _error(
+                    f"unknown scope_type {scope_type!r}; expected one of "
+                    f"{sorted(PERF_SCOPE_TYPES)}"
+                )
+        key = _opt_str(scope_key)
+    except ValueError as exc:
+        return _error(str(exc))
+    try:
+        rows = _perf_rows(
+            date_from=d_from,
+            date_to=d_to,
+            scope_type=scope,
+            scope_key=key,
+            limit=limit,
+        )
+    except sqlite3.OperationalError as exc:
+        # Graceful degradation: a fresh DB before migration 0010 runs has no
+        # daily_performance table. Return the documented empty envelope with a
+        # note the agent can repeat - never a crash, never a raw error string.
+        if "no such table" in str(exc):
+            return {
+                "rows": [],
+                "count": 0,
+                "note": "daily_performance table not available yet (migration 0010)",
+            }
+        return _error(str(exc))
+    except sqlite3.Error as exc:
+        return _error(str(exc))
+    return {"rows": rows, "count": len(rows), "note": None}
 
 
 def main() -> None:

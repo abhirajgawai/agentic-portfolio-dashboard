@@ -63,7 +63,7 @@ from portfolio.fx import get_fx_rates
 from portfolio.normalize.allocation import DIMENSIONS, compute_allocation
 from portfolio.normalize.moomoo import normalize_holdings as normalize_moomoo
 from portfolio.normalize.schema import Holding
-from portfolio.normalize.sectors import load_sectors
+from portfolio.normalize.sectors import load_names, load_sectors
 from portfolio.normalize.zerodha import normalize_holdings as normalize_zerodha
 from portfolio.serve import DEFAULT_PORT
 
@@ -268,7 +268,7 @@ def _snapshot_zerodha(
         # must leave an audited `runs` error row and surface as SessionNotReady
         # - never a raw traceback that kills `--all`'s remaining legs.
         try:
-            holdings = normalize_zerodha(payload, sectors=load_sectors())
+            holdings = normalize_zerodha(payload, sectors=load_sectors(), names=load_names())
         except Exception as exc:  # noqa: BLE001 - audit, then re-raise
             _audit_failure(str(exc))
             raise SessionNotReady(f"zerodha snapshot failed: {exc}") from exc

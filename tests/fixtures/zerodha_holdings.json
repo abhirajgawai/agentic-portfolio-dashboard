@@ -4,7 +4,10 @@
     "exchange": "NSE",
     "quantity": 10,
     "average_price": 1500.0,
-    "last_price": 1610.0
+    "last_price": 1610.0,
+    "close_price": 1630.0,
+    "day_change": -20.0,
+    "day_change_percentage": -1.23
   },
   {
     "tradingsymbol": "SBIN",
@@ -12,6 +15,9 @@
     "quantity": 5,
     "average_price": 700.0,
     "last_price": 680.0,
+    "close_price": 700.0,
+    "day_change": -20.0,
+    "day_change_percentage": -2.86,
     "name": "State Bank of India"
   },
   {

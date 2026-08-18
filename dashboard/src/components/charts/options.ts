@@ -223,3 +223,191 @@ export function returnBarsOption(opts: {
     ],
   }
 }
+
+/**
+ * M8.6 daily performance — dual-axis: day P&L bars (left) + portfolio value
+ * area line (right). Bars are green on gain days, red on loss days; the value
+ * curve gives the scale context. Mirrors trendAreaOption's palette/tooltip so
+ * both charts read as one family.
+ */
+export function dailyPerformanceOption(opts: {
+  dates: string[]
+  dayPnl: number[]
+  value: number[]
+  formatter?: (value: number) => string
+  /** When true, currency labels (tooltip + y-axes) render as MASK_TEXT. */
+  masked?: boolean
+}): EChartsOption {
+  const fmt = opts.formatter ?? ((v: number) => String(v))
+  const valueFmt = (v: number) => (opts.masked ? MASK_TEXT : fmt(v))
+  return {
+    backgroundColor: 'transparent',
+    textStyle: baseTextStyle,
+    tooltip: {
+      trigger: 'axis',
+      backgroundColor: 'rgba(20,20,24,0.92)',
+      borderColor: 'rgba(255,255,255,0.1)',
+      textStyle: { color: '#e8e8ea' },
+      valueFormatter: (v: unknown) => valueFmt(typeof v === 'number' ? v : 0),
+    },
+    grid: { left: 8, right: 8, top: 28, bottom: 4, containLabel: true },
+    xAxis: {
+      type: 'category',
+      boundaryGap: true, // bars sit between ticks
+      data: opts.dates.map((d) => d.slice(5)), // MM-DD tick labels
+      axisLine: { lineStyle: { color: AXIS_LINE } },
+      axisLabel: { color: CHART_TEXT, fontSize: 11 },
+      axisTick: { show: false },
+    },
+    yAxis: [
+      {
+        type: 'value',
+        name: 'Day P&L',
+        nameTextStyle: { color: CHART_TEXT, fontSize: 10 },
+        axisLabel: { color: CHART_TEXT, fontSize: 11, formatter: (v: number) => valueFmt(v) },
+        splitLine: { lineStyle: { color: AXIS_LINE } },
+      },
+      {
+        type: 'value',
+        name: 'Value',
+        nameTextStyle: { color: CHART_TEXT, fontSize: 10 },
+        axisLabel: { color: CHART_TEXT, fontSize: 11, formatter: (v: number) => valueFmt(v) },
+        splitLine: { show: false },
+      },
+    ],
+    legend: {
+      top: 0,
+      right: 0,
+      itemWidth: 10,
+      itemHeight: 10,
+      icon: 'circle',
+      textStyle: { color: CHART_TEXT, fontSize: 11 },
+    },
+    series: [
+      {
+        name: 'Day P&L',
+        type: 'bar',
+        data: opts.dayPnl.map((v) => ({
+          value: v,
+          itemStyle: { color: v >= 0 ? GAIN : LOSS, borderRadius: 2 },
+        })),
+        barMaxWidth: 14,
+      },
+      {
+        name: 'Portfolio value',
+        type: 'line',
+        yAxisIndex: 1,
+        data: opts.value,
+        smooth: 0.3,
+        symbol: 'circle',
+        symbolSize: 5,
+        showSymbol: false,
+        lineStyle: { width: 2, color: CATEGORY_COLORS[0] },
+        itemStyle: { color: CATEGORY_COLORS[0] },
+        areaStyle: { opacity: 0.15 },
+      },
+    ],
+  }
+}
+
+/**
+ * M8.6 simple-return line over the performance dates. Values are PERCENTAGES,
+ * so they stay visible under the privacy mask by design (privacy.tsx: "percentages
+ * reveal no net worth"). Null entries render as gaps in the line (honest about
+ * days where the return is not computable).
+ */
+export function simpleReturnLineOption(opts: {
+  dates: string[]
+  values: Array<number | null>
+}): EChartsOption {
+  return {
+    backgroundColor: 'transparent',
+    textStyle: baseTextStyle,
+    color: [CATEGORY_COLORS[2] ?? '#e2b93d'],
+    tooltip: {
+      trigger: 'axis',
+      backgroundColor: 'rgba(20,20,24,0.92)',
+      borderColor: 'rgba(255,255,255,0.1)',
+      textStyle: { color: '#e8e8ea' },
+      valueFormatter: (v: unknown) => (typeof v === 'number' ? `${v.toFixed(2)}%` : '—'),
+    },
+    grid: { left: 8, right: 8, top: 28, bottom: 4, containLabel: true },
+    xAxis: {
+      type: 'category',
+      boundaryGap: false,
+      data: opts.dates.map((d) => d.slice(5)),
+      axisLine: { lineStyle: { color: AXIS_LINE } },
+      axisLabel: { color: CHART_TEXT, fontSize: 11 },
+      axisTick: { show: false },
+    },
+    yAxis: {
+      type: 'value',
+      axisLabel: { color: CHART_TEXT, fontSize: 11, formatter: '{value}%' },
+      splitLine: { lineStyle: { color: AXIS_LINE } },
+    },
+    series: [
+      {
+        name: 'Simple return',
+        type: 'line',
+        data: opts.values,
+        smooth: 0.3,
+        symbol: 'circle',
+        symbolSize: 5,
+        showSymbol: false,
+        lineStyle: { width: 2 },
+        areaStyle: { opacity: 0.15 },
+      },
+    ],
+  }
+}
+
+/**
+ * M8.6 attribution — horizontal bars for one dimension (byGeography /
+ * byPlatform / byAssetClass) of a single day's day P&L. Bars color by sign;
+ * the tooltip + axis honor the privacy mask (these are ₹ amounts).
+ */
+export function attributionBarsOption(opts: {
+  labels: string[]
+  values: number[]
+  formatter?: (value: number) => string
+  masked?: boolean
+}): EChartsOption {
+  const fmt = opts.formatter ?? ((v: number) => String(v))
+  const valueFmt = (v: number) => (opts.masked ? MASK_TEXT : fmt(v))
+  return {
+    backgroundColor: 'transparent',
+    textStyle: baseTextStyle,
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'shadow' },
+      backgroundColor: 'rgba(20,20,24,0.92)',
+      borderColor: 'rgba(255,255,255,0.1)',
+      textStyle: { color: '#e8e8ea' },
+      valueFormatter: (v: unknown) => valueFmt(typeof v === 'number' ? v : 0),
+    },
+    grid: { left: 8, right: 16, top: 8, bottom: 8, containLabel: true },
+    xAxis: {
+      type: 'value',
+      axisLabel: { color: CHART_TEXT, fontSize: 11, formatter: (v: number) => valueFmt(v) },
+      splitLine: { lineStyle: { color: AXIS_LINE } },
+    },
+    yAxis: {
+      type: 'category',
+      data: opts.labels,
+      axisLabel: { color: CHART_TEXT, fontSize: 10 },
+      axisLine: { lineStyle: { color: AXIS_LINE } },
+      axisTick: { show: false },
+    },
+    series: [
+      {
+        name: 'Contribution',
+        type: 'bar',
+        data: opts.values.map((v) => ({
+          value: v,
+          itemStyle: { color: v >= 0 ? GAIN : LOSS, borderRadius: 2 },
+        })),
+        barMaxWidth: 14,
+      },
+    ],
+  }
+}

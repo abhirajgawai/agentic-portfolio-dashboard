@@ -182,3 +182,132 @@ def test_holding_returns_best_first_costless_last(db):
     assert "error" not in empty
     # ...and a bogus platform still returns the structured error dict.
     assert server.holding_returns(platform="nope")["error"]
+
+
+# ---------------------------------------------------------------------------
+# daily_performance (M8.6): the rebuilt ledger over (perf_date, scope_type,
+# scope_key). The shared `db` fixture runs migrate() (v10 now includes 0010),
+# so the table exists there; the table-missing case gets its own old-schema DB.
+# ---------------------------------------------------------------------------
+
+# Insert statement matching the migration 0010 columns, in table order
+# (fx_rate_id is nullable and left NULL - value_base is already in base ccy).
+_PERF_INSERT = (
+    "INSERT INTO daily_performance (perf_date, scope_type, scope_key, value_base,"
+    " day_pnl_base, broker_day_pnl_base, day_pnl_pct, simple_return_pct,"
+    " cost_with, cost_without, rebuilt_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+)
+# perf_date, scope_type, scope_key, value_base, day_pnl_base,
+# broker_day_pnl_base, day_pnl_pct, simple_return_pct, cost_with, cost_without,
+# rebuilt_at - UNIQUE (perf_date, scope_type, scope_key) respected.
+_PERF_ROWS = [
+    ("2026-08-10", "all", "", 6600000.0, -25000.0, None, -0.38, 46.0, 48, 20, "2026-08-18T06:00:00Z"),
+    ("2026-08-11", "all", "", 6620000.0, 20000.0, None, 0.3, 46.4, 48, 20, "2026-08-18T06:00:00Z"),
+    ("2026-08-10", "geography", "IN", 4800000.0, -12000.0, None, -0.25, 44.0, 30, 12, "2026-08-18T06:00:00Z"),
+    ("2026-08-10", "geography", "US", 1800000.0, -13000.0, -13000.0, -0.72, 51.0, 18, 8, "2026-08-18T06:00:00Z"),
+    ("2026-08-11", "geography", "US", 1820000.0, 18000.0, 18000.0, 1.0, 52.0, 18, 8, "2026-08-18T06:00:00Z"),
+    ("2026-08-10", "platform", "zerodha", 4300000.0, -10000.0, -10000.0, -0.23, 43.0, 30, 5, "2026-08-18T06:00:00Z"),
+    ("2026-08-10", "asset_class", "equity", 5800000.0, -21000.0, None, -0.36, 47.0, 40, 8, "2026-08-18T06:00:00Z"),
+    ("2026-08-11", "currency", "INR", 6620000.0, 20000.0, None, 0.3, 46.4, 48, 20, "2026-08-18T06:00:00Z"),
+]
+
+
+def _seed_perf(db_path) -> None:
+    conn = connect(db_path)
+    for row in _PERF_ROWS:
+        conn.execute(_PERF_INSERT, row)
+    conn.commit()
+    conn.close()
+
+
+def test_daily_performance_filters_order_and_rounding(db):
+    """Rows come back date/scope-ordered, rounded to 2dp, filters exact."""
+    _seed_perf(db)
+
+    out = server.daily_performance()
+    assert out["note"] is None and out["count"] == len(_PERF_ROWS)
+    keys = [(r["perf_date"], r["scope_type"], r["scope_key"]) for r in out["rows"]]
+    assert keys == sorted(keys)  # ORDER BY (perf_date, scope_type, scope_key)
+    first = out["rows"][0]
+    assert set(first) == {
+        "perf_date", "scope_type", "scope_key", "value_base", "day_pnl_base",
+        "broker_day_pnl_base", "day_pnl_pct", "simple_return_pct",
+        "cost_with", "cost_without", "rebuilt_at",
+    }
+    assert first["value_base"] == pytest.approx(6600000.0)
+    assert first["cost_with"] == 48 and first["cost_without"] == 20
+    assert first["rebuilt_at"] == "2026-08-18T06:00:00Z"
+    assert first["broker_day_pnl_base"] is None  # 'all' scope has no broker P&L
+
+    # Two-sided inclusive date window: 5 of the 8 rows fall on 08-10.
+    win = server.daily_performance(date_from="2026-08-10", date_to="2026-08-10")
+    assert win["count"] == 5
+    assert {r["perf_date"] for r in win["rows"]} == {"2026-08-10"}
+    # One-sided ranges work too (BETWEEN semantics extended to >= / <=).
+    assert server.daily_performance(date_from="2026-08-11")["count"] == 3
+    assert server.daily_performance(date_to="2026-08-10")["count"] == 5
+
+    # scope_type filter (case-insensitive input), scope_key case-insensitive.
+    geo = server.daily_performance(scope_type="GEOGRAPHY")
+    assert geo["count"] == 3 and {r["scope_key"] for r in geo["rows"]} == {"IN", "US"}
+    us = server.daily_performance(scope_type="geography", scope_key="us")
+    assert us["count"] == 2 and all(r["scope_key"] == "US" for r in us["rows"])
+    assert us["rows"][0]["broker_day_pnl_base"] == pytest.approx(-13000.0)
+    assert us["rows"][0]["day_pnl_pct"] == pytest.approx(-0.72)  # 2dp rounding
+    assert us["rows"][1]["day_pnl_pct"] == pytest.approx(1.0)
+    # Combined date + scope filter (the "what drove the drop" query shape).
+    drop = server.daily_performance(
+        date_from="2026-08-10", date_to="2026-08-10", scope_type="platform"
+    )
+    assert drop["count"] == 1 and drop["rows"][0]["scope_key"] == "zerodha"
+    assert drop["rows"][0]["day_pnl_base"] == pytest.approx(-10000.0)
+
+
+def test_daily_performance_invalid_inputs_and_limit_clamp(db):
+    _seed_perf(db)
+
+    # Unknown scope_type -> structured error, never an empty success.
+    err = server.daily_performance(scope_type="instrument")
+    assert err["error"] and err["count"] == 0
+    assert "instrument" in err["error"] and "expected one of" in err["error"]
+    # Malformed dates are rejected before they reach SQL.
+    assert server.daily_performance(date_from="10-08-2026")["error"]
+    assert server.daily_performance(date_to="not-a-date")["error"]
+
+    # limit clamped to [1, 500]; garbage -> default (100).
+    assert server.daily_performance(limit=2)["count"] == 2
+    assert server.daily_performance(limit=999_999)["count"] == len(_PERF_ROWS)
+    assert server.daily_performance(limit="bogus")["count"] == len(_PERF_ROWS)
+
+
+def test_daily_performance_missing_table_graceful(tmp_path, monkeypatch):
+    """A pre-0010 schema (no daily_performance): empty envelope + note, no crash.
+
+    Builds a genuine v9 DB by applying migrations 0001..0009 only (the same
+    scripts migrate() would run) - the table the tool reads simply is not
+    there yet, exactly like a fresh DB before the parallel worker's migration
+    lands. Uses `_discover` (same discovery migrate() uses) so a future 0011
+    does not leak into this old-schema fixture.
+    """
+    from portfolio.db.migrate import _discover
+
+    path = tmp_path / "pre_0010.db"
+    conn = connect(path)
+    for version, sql_path in sorted(_discover()):
+        if version >= 10:
+            continue
+        conn.executescript(sql_path.read_text(encoding="utf-8"))
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 9
+    conn.close()
+    monkeypatch.setattr(server, "DB_PATH", path)
+
+    out = server.daily_performance()
+    assert out == {
+        "rows": [],
+        "count": 0,
+        "note": "daily_performance table not available yet (migration 0010)",
+    }
+    # Filtered calls degrade the same way - never a crash, never partial rows.
+    filtered = server.daily_performance(date_from="2026-08-01", scope_type="geography")
+    assert filtered["rows"] == [] and filtered["count"] == 0
+    assert "not available yet" in filtered["note"]

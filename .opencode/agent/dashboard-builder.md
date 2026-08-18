@@ -26,6 +26,10 @@ viewer plus a chat panel that talks to the M7 Q&A agent.
 - Types mirror the JSON contract (see `agent-guardrails`/`dashboard` skills and the
   contract section of PLAN.md).
 - Local dev uses Vite proxy to the backend services.
+- **Parallelize your own work.** Screens consume the same contract but are independent
+  files — build Overview/India/US/Returns/Alerts in parallel batches, one worker (or
+  one `explore` probe) per screen, rather than sequentially. The bridge and the screens
+  are independent too. Serialize only what shares a file (e.g. `contract.ts` edits).
 
 ## Verification
 - `npm run build` type-checks and builds clean; `npm run lint` passes.

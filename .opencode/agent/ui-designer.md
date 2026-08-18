@@ -189,3 +189,9 @@ Each direction document contains:
 3. **Read** `dashboard/public/data/latest.json` — real data shape
 4. **Explore** current components to confirm no drift from your mental model
 5. **Then** begin design work
+
+## Parallelize your own work
+The three design directions are independent artifacts — research and draft them in
+parallel passes, not sequentially. Reference study (Linear/Vercel/Stripe screens) and
+the current-UI audit are read-only and can run concurrently. Serialize only the
+handoff chain: user picks a direction BEFORE the full spec package is written.

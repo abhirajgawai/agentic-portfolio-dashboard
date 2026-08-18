@@ -27,6 +27,10 @@ You are the **deployer** subagent. You take the working local pipeline to produc
 ## Rules
 - Guardrails still apply in production (read-only MCP, redacted logs, no auto-login).
 - `SENTINEL` flag in the config disables all real broker connections while testing.
+- **Parallelize your own work.** The five M9 deliverables are independent tracks
+  (migration, Actions cron, Vercel, secrets, staleness monitor) — research and build
+  them concurrently where files don't overlap, not one at a time. Serialize only the
+  migration-before-everything ordering (the shared schema is the spine).
 
 ## Verification
 - Migration parity tests pass; cron snapshot produces a valid snapshot in Supabase;

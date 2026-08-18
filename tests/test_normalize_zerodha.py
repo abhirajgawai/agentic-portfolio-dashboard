@@ -53,3 +53,33 @@ def test_sectors_from_curated_map() -> None:
     holdings = normalize_holdings(_raw(), sectors={"INFY": ("IT", "Equity")})
     infy = next(h for h in holdings if h.ticker == "INFY")
     assert (infy.sector, infy.asset_class) == ("IT", "Equity")
+
+
+def test_day_change_ccy_is_total_not_per_share() -> None:
+    """Kite's get_holdings `day_change` is the PER-SHARE price change; the
+    schema's day_change_ccy is the position's TOTAL day P&L, so the normalizer
+    must store day_change * quantity. Regression (2026-08-18): the dashboard
+    showed the Zerodha leg at 658 while the app showed +15k; the correct
+    sum(day_change * quantity) was 15,084.13."""
+    holdings = normalize_holdings(_raw())
+    infy = next(h for h in holdings if h.ticker == "INFY")
+    sbin = next(h for h in holdings if h.ticker == "SBIN")
+    assert infy.day_change_ccy == -20.0 * 10.0  # per-share -20 x qty 10
+    assert sbin.day_change_ccy == -20.0 * 5.0  # per-share -20 x qty 5
+    # per-share % equals the position % - a ratio is unaffected by the bug.
+    assert infy.day_change_pct == -1.23
+    # A row without day_change (e.g. CAS-sourced bond) stays None, never a crash.
+    tata = next(h for h in holdings if h.ticker == "TATAMOTORS")
+    assert tata.day_change_ccy is None
+
+
+def test_name_enriched_from_curated_map() -> None:
+    """Kite's get_holdings payload has NO security name field (verified against
+    raw_json), so the display name comes from the curated data/names.csv map.
+    Regression: the Returns tab showed '-' for all 35 Zerodha holdings."""
+    holdings = normalize_holdings(_raw(), names={"INFY": "INFOSYS LIMITED"})
+    infy = next(h for h in holdings if h.ticker == "INFY")
+    assert infy.name == "INFOSYS LIMITED"
+    # A payload name (when a broker ever sends one) wins over the curated map.
+    sbin = next(h for h in holdings if h.ticker == "SBIN")
+    assert sbin.name == "State Bank of India"

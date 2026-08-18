@@ -134,6 +134,10 @@ You review three kinds of things:
 - **Edit only when asked** to fix or clean the code ("clean this up", "apply
   the fixes"). Then make the *minimal* changes that address the findings and
   re-run the checks. Never rewrite for the sake of rewriting.
+- **Parallelize your own review.** The checks are independent and read-only — run
+  `ruff`, `pytest`, `git diff`, and targeted `explore` probes concurrently, and review
+  separate files in parallel passes rather than one long sequential walk. Serialize
+  only what must follow a finding (re-verify after an edit).
 
 ## Reporting back (you are orchestrated)
 Reply in exactly this shape so results can be aggregated:

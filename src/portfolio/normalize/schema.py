@@ -47,6 +47,10 @@ class Holding:
 
     # ---- full-fidelity holding detail (M2.5) ----
     prev_close: float | None = None
+    # day_change_ccy is the position's TOTAL day P&L in its currency
+    # (last - prev_close) * quantity. NOT a per-share value: Kite's get_holdings
+    # `day_change` field is per-share, so the zerodha normalizer multiplies by
+    # quantity before storing (regression fixed 2026-08-18).
     day_change_ccy: float | None = None
     day_change_pct: float | None = None
     pnl_ccy: float | None = None

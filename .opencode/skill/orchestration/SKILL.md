@@ -1,6 +1,6 @@
 ---
 name: orchestration
-description: How the orchestrator decomposes a goal into milestone work items, runs independent worker subagents in parallel, and loops until each milestone's Done-when bar is met. Use whenever planning or delegating multi-step project work, or when a task spans more than one worker agent.
+description: How the orchestrator decomposes EVERY task (not just milestones) into independent work items, runs the parallel frontier as concurrent subagents in one message, and loops until each task's Done-when bar is met. Use whenever planning or delegating multi-step project work, or when a task spans more than one worker agent.
 ---
 
 # Orchestration Skill
@@ -8,14 +8,23 @@ description: How the orchestrator decomposes a goal into milestone work items, r
 The orchestrator conducts specialist workers. It wins by **decomposing well, parallelizing
 safely, and verifying relentlessly** — not by writing code itself.
 
+## The default: decompose EVERY task, run the parallel frontier
+
+Parallelism is not a milestone optimization — it is the default for **every task**,
+however small. Any goal that has 2+ independent deliverables runs its frontier
+concurrently. Sequential execution is the exception, justified only by a hard dependency
+(same-file writes, inspect-before-normalize, milestone gates). Wall-clock time ≈ the
+longest dependency chain, not the sum of all items — so fan out aggressively.
+
 ## Core loop
 ```
 Orient (PLAN.md + repo state)
+  -> Decompose into the smallest independent work items (sizing ladder below)
   -> Plan out loud + todowrite
   -> Find independent work items (the parallel frontier)
   -> Delegate: one `task` call per item, ALL independent calls in ONE message
-  -> Collect results + verify against the milestone's "Done when" bar
-  -> Not met? re-delegate with a fix brief. Met? advance to next milestone.
+  -> Collect results + verify against the task's / milestone's "Done when" bar
+  -> Not met? re-delegate with a fix brief. Met? next batch / next milestone.
   -> Summarize (what / why / files to study / next)
 ```
 
@@ -34,6 +43,17 @@ Orient (PLAN.md + repo state)
 - Always separate **inspect** (`mcp-integration`, writes `samples/`) from **normalize**
   (`normalizer`, reads `samples/`) — that ordering is the inspect-before-normalize guardrail.
 
+### Sizing ladder — how fine to cut
+| Task size | Typical case | Decomposition |
+|---|---|---|
+| Trivial (one file, <15 min) | fix a typo in a normalizer | do it directly — no delegation |
+| Small (one deliverable) | add a CLI flag, tweak a rule | split research/explore from implementation; run `explore` parallel to the worker |
+| Medium (2–4 files) | a feature touching two modules | one worker per file/module, all in one message |
+| Large (a milestone) | M7 agent layer, M8 dashboard | split by deliverable (e.g. MCP server ∥ opencode config ∥ client ∥ eval), parallel batches, verify between batches |
+
+If a task can be cut at any level, cut it — and fan out. Never serialize steps that have
+independent parts.
+
 ## Parallelize — what's safe
 | Safe to run together | Must serialize |
 |---|---|
@@ -43,7 +63,8 @@ Orient (PLAN.md + repo state)
 | Per-platform normalizers once samples exist | DB schema migration + a worker writing to that DB |
 
 Mechanics: issue every independent `task` call **in a single assistant message**; opencode
-runs them concurrently. Dependent items wait for the next loop iteration.
+runs them concurrently. Dependent items wait for the next loop iteration. Default stance:
+**fan out first, serialize only when forced.**
 
 ## Delegate — a brief must be self-contained
 Workers start with NO shared context. Every `task` prompt carries:

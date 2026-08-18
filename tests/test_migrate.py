@@ -21,14 +21,15 @@ def _tables(conn) -> set[str]:
     return {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
 
 
-def test_fresh_migrate_creates_v6_schema(tmp_path) -> None:
+def test_fresh_migrate_creates_v10_schema(tmp_path) -> None:
     path = tmp_path / "t.db"
-    assert migrate(path) == 6
+    assert migrate(path) == 10
     conn = connect(path)
     assert {
         "account", "instrument", "fx_rate", "price_history",
         "position", "position_snapshot", "portfolio_value", "trade", "runs", "account_funds",
         "alert_events",  # v6 (M6): rule-alert dedupe backbone
+        "daily_performance",  # v10 (M8.6): materialized daily performance scopes
     } <= _tables(conn)
     assert {"snapshots", "fx_rates", "trades"} & _tables(conn) == set()
     # v3 adds cost basis in base currency; v4 adds full-fidelity holding detail;
@@ -43,8 +44,8 @@ def test_fresh_migrate_creates_v6_schema(tmp_path) -> None:
 
 def test_migrate_is_idempotent(tmp_path) -> None:
     path = tmp_path / "t.db"
-    assert migrate(path) == 6
-    assert migrate(path) == 6
+    assert migrate(path) == 10
+    assert migrate(path) == 10
 
 
 def test_v1_to_v2_backfills_data(tmp_path) -> None:
@@ -61,7 +62,7 @@ def test_v1_to_v2_backfills_data(tmp_path) -> None:
     raw.commit()
     raw.close()
 
-    assert migrate(path) == 6
+    assert migrate(path) == 10
 
     conn = connect(path)
     assert conn.execute("SELECT COUNT(*) FROM position").fetchone()[0] == 1

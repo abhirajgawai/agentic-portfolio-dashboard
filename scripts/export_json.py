@@ -1,6 +1,7 @@
 """Export the latest snapshot to the M8 dashboard JSON contract.
 
-Produces dashboard/public/data/latest.json + history.json from the SQLite DB.
+Produces dashboard/public/data/latest.json + history.json (+ xirr.json,
+alerts.json, performance.json) from the SQLite DB.
 Every run ends with this (the plan's deterministic dashboard path - the UI
 never touches a broker or the LLM).
 
@@ -40,6 +41,7 @@ OUT = ROOT_DIR / "dashboard" / "public" / "data" / "latest.json"
 OUT_HISTORY = ROOT_DIR / "dashboard" / "public" / "data" / "history.json"
 OUT_XIRR = ROOT_DIR / "dashboard" / "public" / "data" / "xirr.json"
 OUT_ALERTS = ROOT_DIR / "dashboard" / "public" / "data" / "alerts.json"
+OUT_PERF = ROOT_DIR / "dashboard" / "public" / "data" / "performance.json"
 
 # Staleness thresholds (days) per platform: brokers refresh daily, CAS platforms
 # refresh on the monthly import cadence (M-4). Positions older than this mark the
@@ -89,6 +91,9 @@ def _is_stale(as_of: str | None, max_age_days: int, now: datetime) -> bool:
 
 
 def export(db_path: Path = DB_PATH, out: Path = OUT) -> Path:
+    from portfolio.db.migrate import migrate  # noqa: PLC0415
+
+    migrate(db_path)  # fresh-DB safety, same as cas_import/mf_nav/property_import
     conn = connect(db_path)
     try:
         base = Settings().base_currency
@@ -270,6 +275,29 @@ def export(db_path: Path = DB_PATH, out: Path = OUT) -> Path:
             dedupe_and_send(conn, fired, today=today, now_utc=now)
         except Exception as exc:  # noqa: BLE001 - alerts optional
             logger.warning("alert evaluation failed (export continues): %s", exc)
+
+        # M8.6: daily performance tracker - day P&L, returns, attribution and
+        # revaluation events, derived from position_snapshot (interval rule).
+        # CORE, unlike alerts: a failure here propagates AFTER latest/history/
+        # xirr/alerts are already written, so those files survive. The engine
+        # is deterministic (injected `today` = the same Kolkata market date the
+        # alerts use); `asOf` = this export's instant is added by the caller
+        # (the engine never reads a clock). `_scopes` is the private table
+        # payload for rebuild_table - stripped before the file is written so
+        # performance.json matches the pinned dashboard contract exactly.
+        from portfolio.alerts.engine import kolkata_date  # noqa: PLC0415
+        from portfolio.performance import daily_performance, rebuild_table  # noqa: PLC0415
+
+        today = kolkata_date(now)
+        perf_payload = daily_performance(conn, today=today)
+        perf_payload["asOf"] = now.isoformat()
+        rebuilt = rebuild_table(conn, perf_payload, rebuilt_at=now.isoformat())
+        perf_payload.pop("_scopes", None)
+        OUT_PERF.parent.mkdir(parents=True, exist_ok=True)
+        OUT_PERF.write_text(json.dumps(perf_payload, indent=2), encoding="utf-8")
+        logger.info(
+            "daily performance: %d days, %d scope rows rebuilt", len(perf_payload["daily"]), rebuilt
+        )
         return out
     finally:
         conn.close()
@@ -281,3 +309,4 @@ if __name__ == "__main__":
     print(f"exported -> {OUT_HISTORY}")
     print(f"exported -> {OUT_XIRR}")
     print(f"exported -> {OUT_ALERTS}")
+    print(f"exported -> {OUT_PERF}")

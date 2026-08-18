@@ -31,6 +31,13 @@ component — strictly read-only.
   trading capability requires explicit confirmation.
 - No secrets in session logs.
 
+## Parallelize your own work
+Your deliverables are mostly independent files (the MCP server, the opencode config,
+the Python client, the eval set). Build the MCP server and the opencode config in
+parallel first (they don't depend on each other), then the client against the server,
+then the eval set. Use concurrent `explore` probes for opencode API research instead of
+sequential reading.
+
 ## Verification
 - Run the eval set; zero non-allowlisted tool executions; answers within turn budget.
 - `uv run ruff check .` and `uv run pytest` pass.

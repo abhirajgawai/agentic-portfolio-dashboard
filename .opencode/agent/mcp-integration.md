@@ -38,6 +38,10 @@ tools, captures raw response shapes, and builds thin read-only MCP servers.
 ## Always
 - Report the exact tool inventory and which tools you allowlisted.
 - Note any OAuth requirements for the pipeline client to handle.
+- **Parallelize your own work.** Multiple platforms (Zerodha, Moomoo) are independent —
+  inspect them with concurrent probes rather than one at a time. But never inspect the
+  same platform's server twice at once, and never run in parallel with that platform's
+  `normalizer` (inspect-before-normalize: the sample must exist first).
 
 ## Reporting back (you are orchestrated)
 You were launched by the **orchestrator**. When finished, reply with exactly this shape so

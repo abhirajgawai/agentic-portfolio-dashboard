@@ -79,7 +79,10 @@ The default agent is the **orchestrator** (`.opencode/agent/orchestrator.md`), a
 conductor that decomposes a goal into milestone work items, delegates each to a
 specialist **worker subagent**, runs independent workers **in parallel**, and **loops**
 until the milestone's `✅ Done when:` bar is met before advancing. It verifies results
-itself rather than trusting a worker's self-report.
+itself rather than trusting a worker's self-report. **Parallelism is the default for
+EVERY task, not just milestones** — any goal with 2+ independent deliverables is
+decomposed and fanned out concurrently; sequential execution happens only under a hard
+dependency (same-file writes, inspect-before-normalize, milestone gates).
 
 | Agent | Mode | Owns |
 |---|---|---|
@@ -94,6 +97,12 @@ itself rather than trusting a worker's self-report.
 | `code-reviewer` | all | independent review of plans/code/diffs — structure, logic, security, guardrail compliance, AI-slop cleanup; verdict at milestone gates |
 
 Rules of the topology:
+- **Parallelize by default, decompose everything.** Any task — a milestone, a feature,
+  a bug fix, a config change — is first decomposed into its smallest independently-
+  finishable work items, then the parallel frontier is fanned out in one message.
+  Workers also decompose their own briefs (parallel `explore` probes, per-platform
+  normalizers) and run independent sub-units concurrently. Sequential execution is the
+  exception, justified only by a hard dependency.
 - **Parallelize within a milestone, never across milestones.** Build order stays a hard
   gate; the orchestrator advances sequentially and parallelizes independent items inside
   the current milestone.

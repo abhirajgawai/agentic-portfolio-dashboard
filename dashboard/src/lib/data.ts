@@ -1,7 +1,7 @@
 /**
  * Typed data client — THE ONLY seam between the dashboard and the pipeline.
  *
- * Today: fetches the four static JSON files from `public/data/` (same origin,
+ * Today: fetches the five static JSON files from `public/data/` (same origin,
  * served by Vite in dev, copied to dist in build).
  *
  * M9: point VITE_DATA_BASE_URL at the Supabase/PostgREST backend and the same
@@ -12,7 +12,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { z } from 'zod'
 
-import { AlertsSchema, HistorySchema, LatestSchema, XirrSchema, PropertyImportRequestSchema, PropertyImportResponseSchema } from '@/types/contract'
+import { AlertsSchema, HistorySchema, LatestSchema, PerformanceSchema, XirrSchema, PropertyImportRequestSchema, PropertyImportResponseSchema } from '@/types/contract'
 
 /** Base URL for the contract files. Empty = same origin (`/data/*.json`). */
 const DATA_ROOT = (import.meta.env.VITE_DATA_BASE_URL as string | undefined) ?? ''
@@ -56,9 +56,10 @@ export const loadLatest = () => loadJson('latest.json', dataUrl('latest.json'), 
 export const loadHistory = () => loadJson('history.json', dataUrl('history.json'), HistorySchema)
 export const loadAlerts = () => loadJson('alerts.json', dataUrl('alerts.json'), AlertsSchema)
 export const loadXirr = () => loadJson('xirr.json', dataUrl('xirr.json'), XirrSchema)
+export const loadPerformance = () => loadJson('performance.json', dataUrl('performance.json'), PerformanceSchema)
 
 /* ------------------------------------------------------------------ */
-/* TanStack Query hooks — server state for the four contract files     */
+/* TanStack Query hooks — server state for the five contract files     */
 /* ------------------------------------------------------------------ */
 
 const QUERY_OPTIONS = {
@@ -81,6 +82,10 @@ export function useAlerts() {
 
 export function useXirr() {
   return useQuery({ queryKey: ['xirr'], queryFn: loadXirr, ...QUERY_OPTIONS })
+}
+
+export function usePerformance() {
+  return useQuery({ queryKey: ['performance'], queryFn: loadPerformance, ...QUERY_OPTIONS })
 }
 
 /* ------------------------------------------------------------------ */

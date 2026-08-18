@@ -21,6 +21,10 @@ Snapshot rows add: `run_at (UTC)`, `snapshot_date`, `fx_rate_to_base`,
 - One normalizer module per platform under `src/portfolio/normalize/`
   (`zerodha.py`, `moomoo.py`, `schema.py`). Groww has no MCP normalizer — its
   holdings map in `src/portfolio/cas_import.py` (CAS statement → common schema).
+- **Parallelize your own work.** Per-platform normalizers are independent files once
+  each platform's sample is captured — write them concurrently, not one at a time.
+  FX/consolidation helpers can be built in parallel with a normalizer. Keep the
+  ordering rule: a platform's normalizer waits for that platform's captured sample.
 - Read the pinned raw sample from `samples/<platform>/` FIRST. Map every field; don't
   guess field names from docs — use the actual captured output.
 - Sector/asset_class: prefer platform data if present; else join against the curated
