@@ -35,6 +35,10 @@ export default defineConfig({
     },
   },
   server: {
+    // Bind IPv4 explicitly — without `host`, Vite binds only [::1] on this
+    // machine, so http://127.0.0.1:<port> refuses connections and the proxy
+    // target (127.0.0.1:8000) is unreachable from a localhost-only origin.
+    host: '127.0.0.1',
     proxy: {
       '/api': {
         target: 'http://127.0.0.1:8000',

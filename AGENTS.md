@@ -97,12 +97,20 @@ dependency (same-file writes, inspect-before-normalize, milestone gates).
 | `code-reviewer` | all | independent review of plans/code/diffs — structure, logic, security, guardrail compliance, AI-slop cleanup; verdict at milestone gates |
 
 Rules of the topology:
-- **Parallelize by default, decompose everything.** Any task — a milestone, a feature,
-  a bug fix, a config change — is first decomposed into its smallest independently-
-  finishable work items, then the parallel frontier is fanned out in one message.
-  Workers also decompose their own briefs (parallel `explore` probes, per-platform
+- **Parallelize by default, decompose everything — automatically.** Any task — a
+  milestone, a feature, a bug fix, a config change — is first decomposed into its
+  smallest independently-finishable work items, then the parallel frontier is fanned
+  out in one message. No agent ever waits to be told to parallelize or asks whether
+  parallel work is wanted; it is the unconditional default for every task. Workers
+  also decompose their own briefs (parallel `explore` probes, per-platform
   normalizers) and run independent sub-units concurrently. Sequential execution is the
   exception, justified only by a hard dependency.
+- **Permission is ALLOW everywhere by design.** No agent or session ever waits on a
+  permission prompt — parallel fan-outs must not stall. The safety boundary is the
+  **`tools` allowlist** (glob denials + per-agent overrides, guardrail #1), which is a
+  hard deny, never a prompt. Never reintroduce `permission: ask`/`deny` to "fix"
+  safety — tighten the allowlist instead. The `portfolio-analyst` agent's read-only
+  tool set stays as-is (its deny list is the guardrail, not a prompt).
 - **Parallelize within a milestone, never across milestones.** Build order stays a hard
   gate; the orchestrator advances sequentially and parallelizes independent items inside
   the current milestone.

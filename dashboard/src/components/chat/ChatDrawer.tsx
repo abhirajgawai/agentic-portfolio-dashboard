@@ -113,7 +113,7 @@ export function ChatDrawer({
             title={agentOnline === null ? 'checking…' : agentOnline ? 'agent online' : 'agent offline'}
           />
         </div>
-        <Button variant="ghost" size="icon" className="size-7" onClick={onClose} aria-label="Close chat">
+        <Button variant="ghost" size="icon" className="size-7 cursor-pointer" onClick={onClose} aria-label="Close chat">
           <X className="size-4" />
         </Button>
       </div>
@@ -140,7 +140,7 @@ export function ChatDrawer({
                     type="button"
                     onClick={() => void send(s)}
                     disabled={busy}
-                    className="rounded-md border border-border px-3 py-1.5 text-left text-xs text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground disabled:opacity-50"
+                    className="rounded-md border border-border px-3 py-1.5 text-left text-xs text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground disabled:opacity-50 cursor-pointer"
                   >
                     {s}
                   </button>
@@ -225,6 +225,7 @@ export function ChatDrawer({
           onClick={() => void send(input)}
           disabled={busy || input.trim() === ''}
           aria-label="Send question"
+          className="cursor-pointer"
         >
           <Send className="size-4" />
         </Button>

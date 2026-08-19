@@ -146,3 +146,40 @@ export async function deleteProperty(propertyId: string): Promise<PropertyDelete
   }
   return parsed.data
 }
+
+/* ------------------------------------------------------------------ */
+/* CAS import (POST multipart to bridge)                               */
+/* ------------------------------------------------------------------ */
+
+export const CasImportResponseSchema = z.object({
+  ok: z.boolean(),
+  import: z.string().optional(),
+  export: z.string().optional(),
+  error: z.string().optional(),
+})
+
+export type CasImportResponse = z.infer<typeof CasImportResponseSchema>
+
+/** Import a CAS PDF via the bridge (file upload). */
+export async function importCas(file: File, password: string = ''): Promise<CasImportResponse> {
+  const formData = new FormData()
+  formData.append('file', file)
+  if (password) {
+    formData.append('password', password)
+  }
+
+  const res = await fetch(apiUrl('/cas/import'), {
+    method: 'POST',
+    body: formData,
+  })
+
+  const raw: unknown = await res.json()
+  const parsed = CasImportResponseSchema.safeParse(raw)
+  if (!parsed.success) {
+    throw new Error(`CAS import response invalid: ${parsed.error.message}`)
+  }
+  if (!res.ok || !parsed.data.ok) {
+    throw new Error(parsed.data.error ?? `HTTP ${res.status}`)
+  }
+  return parsed.data
+}

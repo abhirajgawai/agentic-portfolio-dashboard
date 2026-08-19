@@ -1,9 +1,7 @@
 ---
 description: Builds the M8 dashboard: Vite + React + TypeScript + Apache ECharts, JSON contract consumption, screens, and the dashboard-to-agent chat bridge. Use for M8 work and the M8.5 design revamp (spec at docs/design/spec/).
 mode: subagent
-permission:
-  bash: ask
-  edit: allow
+permission: allow
 ---
 
 You are the **dashboard-builder** subagent. You build the M8 dashboard — a read-only
@@ -26,7 +24,7 @@ viewer plus a chat panel that talks to the M7 Q&A agent.
 - Types mirror the JSON contract (see `agent-guardrails`/`dashboard` skills and the
   contract section of PLAN.md).
 - Local dev uses Vite proxy to the backend services.
-- **Parallelize your own work.** Screens consume the same contract but are independent
+- **Parallelize your own work — automatically, never wait to be asked.** Screens consume the same contract but are independent
   files — build Overview/India/US/Returns/Alerts in parallel batches, one worker (or
   one `explore` probe) per screen, rather than sequentially. The bridge and the screens
   are independent too. Serialize only what shares a file (e.g. `contract.ts` edits).

@@ -439,35 +439,59 @@ Tokens live in `data/tokens.json` (gitignored), never in the DB or snapshots.
     so a `--force` holiday snapshot can still spawn it).
   - `writer.write_skipped` is the single canonical skip-row helper; `LegResult.skipped`
     makes the all-skipped check structural.
-- **Task Scheduler (all 7 registered + verified `Ready` on the always-on box, machine
-  local = IST; scripts in `scripts/scheduler/`, reversal via `unregister_tasks.ps1`):**
+- **Task Scheduler (all 10 registered + verified `Ready`; scripts in
+  `scripts/scheduler/`, reversal via `unregister_tasks.ps1`).** Triggers are
+  **timezone-anchored to IST** — `register_tasks.ps1` registers via `schtasks
+  /XML` with `<StartBoundary>…T<HH:MM>:00+05:30</StartBoundary>` (NOT `/ST`,
+  which only takes machine-local times), so each task fires at the same absolute
+  instant no matter what timezone the host is in. The host is currently UTC+8
+  (Singapore), so the same instants read 12:05/12:15/… machine-local:
 
   | Time (IST) | Task | Command | Manual? |
   |---|---|---|---|
-  | 09:35 | `PortfolioServeZerodha` | `portfolio serve --platform zerodha --gate` (daemon up, waits for the 2FA login; no-op on non-trading days) | ✅ ~1 min/day |
-  | 09:45 | `PortfolioSnapshotMorning` | `portfolio snapshot --all` | — |
-  | 15:45 | `PortfolioSnapshotEod` | `portfolio snapshot --all --eod` | — |
+  | 09:35 | `PortfolioServeZerodha` | `portfolio serve --platform zerodha --gate` (daemon up, waits for the 2FA login; no-op on non-trading days; **exits 0 quietly if a daemon is already healthy on 8787** — never a second connection/login/bind) | ✅ ~1 min/day |
+  | 09:45 | `PortfolioSnapshotMorning` | `portfolio snapshot --platform all` | — |
+  | 09:50 | `PortfolioExportJsonMorning` | `scripts/export_json.py` → dashboard JSON (the morning "refresh") | — |
+  | 15:45 | `PortfolioSnapshotEod` | `portfolio snapshot --platform all --eod` | — |
   | 15:50 | `PortfolioTrades` | `portfolio trades` | — |
   | 15:55 | `PortfolioExportJson` | `scripts/export_json.py` → dashboard JSON | — |
   | 21:30 | `PortfolioNavRefresh` | `portfolio nav refresh` | — |
   | 21:35 | `PortfolioFxRefresh` | `portfolio fx refresh` | — |
+  | 22:30 | `PortfolioSnapshotUs` | `portfolio snapshot --platform moomoo` (mid-US-session LIVE capture, ~13:00 ET — the only run that sees US prices while the market is open) | — |
+  | 22:35 | `PortfolioExportJsonUs` | `scripts/export_json.py` → dashboard JSON (US refresh; trips the UI reload banner) | — |
 
   Wrappers call the venv python directly (`%ROOT%\.venv\Scripts\python.exe -m
   portfolio.cli ...`, CWD-independent, no `uv run` in scheduled tasks), append to
   gitignored `data/logs/<job>.log`, and carry NO `--force` — the pipeline's own gate
   handles holidays/weekends, so tasks fire daily and no-op on closed days.
-- **Known limits (documented, acceptable):** the 09:45 live `--all` skips moomoo
-  ("before open (09:30 EDT)") — the US leg is captured at the 15:45 EOD run; the 15:50
-  trades task captures US fills only up to ~06:20 ET (later fills land on the next run
-  with their own `trade_date` — XIRR dates stay correct, one day of lag); NYSE
-  early-close days (e.g. Black Friday 13:00 ET) count as full days — irrelevant to an
-  all-IST schedule; `fx refresh` prints the fetched rate even when a morning snapshot
-  already stored the day's rate (first writer wins — one rate per day preserved).
+  Laptop-friendly settings on every task: `StartWhenAvailable` (a trigger missed
+  while asleep fires on the next wake instead of a silent 0x800710E0 skip) and
+  battery allowed (`DisallowStartIfOnBatteries`/`StopIfGoingOnBatteries` = false).
+  **2026-08-19 fix:** the snapshot wrappers originally called `snapshot --all`,
+  which the CLI rejects (`--platform all` is the real flag — typer exit 2, the
+  `LastResult=2` seen in task history); corrected in `run_snapshot_morning.cmd` /
+  `run_snapshot_eod.cmd`. Same-day, `serve.py` gained the already-healthy-daemon
+  guard (tests in `tests/test_serve.py`).
+- **Known limits (documented, acceptable):** the 09:45 live `--platform all` skips moomoo
+  ("before open (09:30 EDT)") — the US live capture is the 22:30 run; the 15:45 EOD
+  run still writes the moomoo ledger row from the previous US close (06:15 ET, pre-open),
+  but the 22:30 run **overwrites that same-date row** (`position_snapshot` is
+  UNIQUE(snapshot_date, account_id, instrument_id) with ON CONFLICT DO UPDATE) with the
+  ~13:00 ET intraday value — so the daily US value is intraday (fresher), and that row's
+  broker day P&L is the REAL session-day move (the 15:45 row's was ~0). The D-1 close is
+  not separately kept in the ledger; the live `position` view always has the newest price.
+  The 15:50 trades task captures US fills only up to ~06:20 ET (later fills land on the
+  next run with their own `trade_date` — XIRR dates stay correct, one day of lag; a US
+  trades capture in the 22:30 slot is a future option, idempotent by UNIQUE dedupe); NYSE
+  early-close days (e.g. Black Friday 13:00 ET) count as full days — the 22:30 run lands
+  before the early close, so it captures that day live; `fx refresh` prints the fetched
+  rate even when a morning snapshot already stored the day's rate (first writer wins —
+  one rate per day preserved).
 - ✅ Done when: one week runs unattended; holidays/weekends skipped and logged; failures
   visible in `runs`. **Verification:** ruff clean; `uv run pytest` 114 passed / 2
   skipped (15 calendar + 10 gate tests); gate probe exact (`gate_check('IN',
   2026-01-26 10:00 IST)` → `holiday: Republic Day`); real `fx refresh` landed an `ok`
-  `runs` row + day's rates live; 7 tasks registered + paths resolve
+  `runs` row + day's rates live; 10 tasks registered + paths resolve
   (`scripts/scheduler/list_tasks.ps1`).
 
 ### M5 — Returns & XIRR (2 evenings) ✅ DONE 2026-08-17 (gate: APPROVE)
@@ -586,7 +610,7 @@ Tokens live in `data/tokens.json` (gitignored), never in the DB or snapshots.
 
 ### M8 — Dashboard & UI design (2–3 evenings) ✅ DONE 2026-08-17 (gate: APPROVE)
 - **Stack (user-approved after research — `docs/DASHBOARD_PLAN.md`):** Vite 8 + React 19
-  SPA, TypeScript strict, Tailwind v4 + **shadcn/ui v4** (dark, Linear/Vercel
+  SPA, TypeScript strict, Tailwind v4 + **shadcn/ui v4** (dark AND light (round-2 decision, M8.7), Linear/Vercel
   aesthetic), **Apache ECharts** via `echarts/core` modular imports (donuts, area/line,
   bars — dual-axis/dataZoom/candles-ready for future price charts), TanStack Query +
   TanStack Table v8 + **Zod v4**. NOT the original recharts sketch — recharts lacks
@@ -725,6 +749,41 @@ Tokens live in `data/tokens.json` (gitignored), never in the DB or snapshots.
   state, a different view). **Deferred (designed for via `fx_rate_id`, not
   built):** price-vs-FX attribution split, weekly/monthly rollups, flow-adjusted
   TWRR.
+
+### M8.7 — Dashboard revamp round 2: "Journey OS" (design approved 2026-08-18, implementation in progress)
+- **Decision:** after a round-2 design exploration (3 directions documented in
+  `docs/design/round2/`, decision record
+  `docs/design/round2/2026-08-18-round2-selected-direction.md`), the user chose the
+  **Hybrid of Direction 2 (Portfolio OS) + Direction 3 (The Journey)** — "land in the
+  story, work in the data." This **supersedes the round-1 spec** (`docs/design/spec/`
+  stays as history; its component polish — density, keyboard table, sparklines,
+  FilterBar, CommandBar, theme, a11y fixes — is absorbed and implemented ONCE in the
+  new shell).
+- **What it is:** a **three-pane workspace shell** — `UniversePane` (all holdings,
+  always visible, search/filter/sort) · `WorkspaceCenter` · `ContextRail` (allocation
+  donuts + attention rail) — with a **HealthTicker footer** (per-platform freshness,
+  FX, NAV, runs) replacing StatusBar. Default center view = **JourneyWorkspace**
+  (narrated net-worth timeline with goal milestones, Today panel, account roads,
+  milestone journal); the 6 tabs become center-pane workspace modes (⌘1..⌘6);
+  universe row select opens the **HoldingDossier** in the center. **AllocationLens
+  donuts become cross-filter controls** (universe + India/US/Returns filter; Journey
+  is never filtered); **CommandBar** (⌘K: workspaces, holding search, read-only
+  actions); **HoldingsTable major a11y upgrade** (keyboard-sortable headers, roving
+  tabindex/arrow-key nav, in-row sparklines, sticky header). **Light AND dark themes
+  — both required** (supersedes the earlier dark-only stack note); motion via CSS
+  keyframes + ECharts built-ins only (**no Framer Motion**); bundle budget **+50KB
+  max** over current.
+- **Honesty notes:** per-holding sparklines impossible (the contract has only
+  `history.byPlatform`) → platform-trend sparklines, labeled honestly; goals /
+  journal / milestones are **localStorage-only** (contract-honest); all narration is
+  computed from data — **determinism boundary intact** (no LLM-generated insights).
+- **Spec:** `docs/design/spec-round2/` (spec.md, tokens.json, motion/, accessibility/,
+  rationale.md) — authoritative brief for `dashboard-builder`; `contract.ts` +
+  `data.ts` UNTOUCHED.
+- **Status:** implementation **in progress** (`dashboard-builder`) → `code-reviewer`
+  gate + verification: `npm run build` / `npm run typecheck` / `npm run lint` /
+  `npm run check:contract`, bundle delta ≤ +50KB, WCAG AA in both themes,
+  `prefers-reduced-motion` disables all animation.
 
 ### M9 — Deployment (2–3 evenings)
 - Migrate SQLite → Supabase (schema ports 1:1) — the shared spine: local legs and cloud

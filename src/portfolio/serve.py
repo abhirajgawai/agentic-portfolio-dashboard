@@ -24,6 +24,7 @@ import asyncio
 import logging
 from typing import Any
 
+import httpx
 import uvicorn
 from starlette.applications import Starlette
 from starlette.requests import Request
@@ -153,4 +154,26 @@ async def _run(host: str, port: int) -> None:
 
 
 def run(host: str = "127.0.0.1", port: int = DEFAULT_PORT) -> None:
+    if _daemon_healthy(host, port):
+        # A scheduled 09:35 IST serve firing while a daemon is already up (e.g.
+        # one started manually) must NOT open a SECOND hosted-MCP connection,
+        # prompt a SECOND daily login, and then die on the port bind. The live
+        # daemon already serves /rpc to snapshots - exit 0 quietly instead.
+        print(f"zerodha daemon already running on {host}:{port} - not starting a second one")
+        return
     asyncio.run(_run(host, port))
+
+
+def _daemon_healthy(host: str, port: int) -> bool:
+    """True when a portfolio serve daemon is already answering /health with ok.
+
+    Read-only probe (loopback GET, 2s timeout). Any failure - connection
+    refused, non-JSON, unhealthy response - means "no usable daemon" and the
+    caller proceeds with the normal start (a stale/unhealthy process must not
+    block a fresh daemon).
+    """
+    try:
+        resp = httpx.get(f"http://{host}:{port}/health", timeout=2.0)
+        return resp.status_code == 200 and bool(resp.json().get("ok"))
+    except Exception:  # noqa: BLE001 - any failure means "no daemon": proceed
+        return False

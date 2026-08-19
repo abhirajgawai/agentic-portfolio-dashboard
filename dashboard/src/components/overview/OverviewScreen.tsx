@@ -1,8 +1,8 @@
-/** Overview screen — header cards, allocation donuts, value-over-time chart.
+/** Overview screen — header cards + value-over-time chart.
+ *  Allocation donuts live in their own Allocation tab (AllocationScreen).
  *  Renders purely from the contract JSONs (zero network beyond the static
  *  files); stale badges + alert chips live in the StatusBar above. */
 
-import { AllocationDonuts } from '@/components/overview/AllocationDonuts'
 import { OverviewCards } from '@/components/overview/OverviewCards'
 import { TrendChart } from '@/components/overview/TrendChart'
 import { ErrorState, LoadingState } from '@/components/layout/states'
@@ -37,10 +37,9 @@ export function OverviewScreen() {
   return (
     <div className="space-y-4">
       <OverviewCards latest={latest.data} xirr={xirr.data} />
-      <AllocationDonuts allocation={latest.data.allocation} />
       <TrendChart history={history.data} />
-      {/* alerts count is surfaced in the StatusBar; the full list lives on the
-          Alerts tab — keep the overview dense. */}
+      {/* Allocation donuts moved to their own Allocation tab (AllocationScreen).
+          Alerts live on the Alerts tab. */}
     </div>
   )
 }

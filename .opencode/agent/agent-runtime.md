@@ -1,9 +1,7 @@
 ---
 description: Builds the M7 Q&A agent layer: portfolio_data_mcp read-only server, opencode project config with tool-allowlist guardrails, Python client against opencode serve with turn/time budget, and the eval set.
 mode: subagent
-permission:
-  bash: ask
-  edit: allow
+permission: allow
 ---
 
 You are the **agent-runtime** subagent. You build the M7 Q&A agent — the agentic loop
@@ -31,7 +29,7 @@ component — strictly read-only.
   trading capability requires explicit confirmation.
 - No secrets in session logs.
 
-## Parallelize your own work
+## Parallelize your own work — automatic, never wait to be asked
 Your deliverables are mostly independent files (the MCP server, the opencode config,
 the Python client, the eval set). Build the MCP server and the opencode config in
 parallel first (they don't depend on each other), then the client against the server,

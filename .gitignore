@@ -49,5 +49,10 @@ Thumbs.db
 # dashboard/src/components/ui/. Real components live under dashboard/src/.
 dashboard/@/
 
+# Playwright e2e artifacts — screenshots + test-results/ are throwaway debug
+# output (dashboard/e2e/*.png, test-results/); specs (.spec.ts) DO commit.
+dashboard/e2e/*.png
+test-results/
+
 # ---- opencode node_modules (its own .gitignore also covers this) ----
 .opencode/node_modules/

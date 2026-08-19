@@ -156,7 +156,7 @@ flowchart TD
 | M2 | Moomoo + consolidated view | ✅ | OpenD gateway + read-only wrapper; one FX rate per run; allocation sums to 100% |
 | M3 | Groww via free CAS import + trade capture | ✅ | `casparser` parses the monthly CAS; AMFI NAV refreshes MF/ETF prices daily |
 | M3.5 | Hardening (audit every failure, derived value series, freshness) | ✅ | 4 MAJOR review findings closed; `history.json` derived from the EOD ledger |
-| M4 | Scheduling + calendars | ✅ | 7 daily Task Scheduler jobs; `calendars.py` gate skips+logs holidays/weekends; `--force` override; year-rolling holiday files |
+| M4 | Scheduling + calendars | ✅ | 10 daily Task Scheduler jobs (IST-anchored triggers, incl. 22:30 US live + 22:35 US export); `calendars.py` gate skips+logs holidays/weekends; `--force` override; year-rolling holiday files |
 | M5 | Returns & XIRR | ⏳ | Per-holding return from cost basis; XIRR solver over `trade` rows + current value |
 | M6 | Alerts (rule-based only) | ⏳ | `rules.yaml` (drop %, target/stop, RSI/MA) evaluated after each snapshot → Telegram, deduped per day; no AI |
 | M7 | Q&A agent | ⏳ | Read-only `portfolio_data_mcp` over SQLite inside opencode; tool allowlist + turn budget; eval set |

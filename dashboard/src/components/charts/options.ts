@@ -411,3 +411,56 @@ export function attributionBarsOption(opts: {
     ],
   }
 }
+
+/**
+ * Resolve the theme-aware chart palette from the CSS custom properties
+ * (--chart-1..9) set on :root / .dark in index.css. Falls back to the
+ * hardcoded CATEGORY_COLORS if the vars aren't present (e.g. SSR).
+ */
+export function getChartPalette(): string[] {
+  if (typeof document !== 'undefined') {
+    const styles = getComputedStyle(document.documentElement)
+    const colors: string[] = []
+    for (let i = 1; i <= 9; i++) {
+      const v = styles.getPropertyValue(`--chart-${i}`).trim()
+      if (v) colors.push(v)
+    }
+    if (colors.length) return colors
+  }
+  return CATEGORY_COLORS
+}
+
+/** ECharts linear-gradient object for area fills (top → bottom fade). */
+export function gradientFill(
+  color: string,
+): { type: 'linear'; x: number; y: number; x2: number; y2: number; colorStops: { offset: number; color: string }[] } {
+  return {
+    type: 'linear',
+    x: 0,
+    y: 0,
+    x2: 0,
+    y2: 1,
+    colorStops: [
+      { offset: 0, color },
+      { offset: 1, color: 'transparent' },
+    ],
+  }
+}
+
+/** dataZoom option for zoomable charts — inside (wheel/pinch) + optional slider. */
+export function dataZoomOption(
+  opts: { start?: number; end?: number; showSlider?: boolean } = {},
+) {
+  const { start = 0, end = 100, showSlider = false } = opts
+  const zooms: unknown[] = [
+    {
+      type: 'inside',
+      start,
+      end,
+    },
+  ]
+  if (showSlider) {
+    zooms.push({ type: 'slider', bottom: 0, start, end })
+  }
+  return zooms
+}

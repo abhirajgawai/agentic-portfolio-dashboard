@@ -1,6 +1,7 @@
 /**
- * Refresh orchestration — POST /api/refresh, then invalidate the four contract
- * queries so every screen re-renders from the regenerated JSONs.
+ * Refresh orchestration — POST /api/refresh, then invalidate the five contract
+ * queries so every screen re-renders from the regenerated JSONs (latest,
+ * history, alerts, xirr, performance).
  */
 
 import { useCallback, useState } from 'react'
@@ -14,7 +15,7 @@ export type RefreshState =
   | { status: 'done'; detail: string }
   | { status: 'error'; detail: string }
 
-const CONTRACT_KEYS = ['latest', 'history', 'alerts', 'xirr'] as const
+const CONTRACT_KEYS = ['latest', 'history', 'alerts', 'xirr', 'performance'] as const
 
 function summarize(summary: unknown): string {
   if (summary === null || summary === undefined) return 'ok'

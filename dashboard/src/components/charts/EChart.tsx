@@ -19,9 +19,13 @@ type EChartProps = {
   option: EChartsOption
   height?: number | string
   className?: string
+  /** Event name → handler (e.g. `{ click: (p) => ... }`). Re-bound on change.
+   *  The payload is the ECharts event object (shape varies by event/series);
+   *  consumers cast it to the shape they need (pie click → { name, dataIndex }). */
+  onEvents?: Record<string, (params: unknown) => void>
 }
 
-export function EChart({ option, height = 240, className }: EChartProps) {
+export function EChart({ option, height = 240, className, onEvents: _onEvents }: EChartProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<ReturnType<typeof echarts.init> | null>(null)
 

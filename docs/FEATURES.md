@@ -1,4 +1,4 @@
-# Features — Milestones M0 through M8.5
+# Features — Milestones M0 through M8.7
 
 Everything built so far (as of 2026-08-18). Source of truth: `PLAN.md` (the plan)
 and the code itself — this file is the readable inventory. Every milestone passed
@@ -17,6 +17,7 @@ its independent review gate (code-reviewer verdict APPROVE) before advancing.
 | M7 Q&A agent | ✅ DONE 2026-08-17 | APPROVE |
 | M8 Dashboard + UI design | ✅ DONE 2026-08-17 | APPROVE |
 | M8.5 Real-estate property leg | ✅ DONE 2026-08-18 | — (adopted, not gated) |
+| M8.7 Dashboard revamp round 2 — Journey OS | 🚧 in progress (design approved 2026-08-18) | — |
 | M9 Deploy | ⏳ pending | — |
 
 ---
@@ -138,9 +139,14 @@ its independent review gate (code-reviewer verdict APPROVE) before advancing.
   `get_fx_rates` call, `platform='fx'` run audit, idempotent.
 - **`serve --gate`** — the 09:35 daemon start exits 0 quietly on non-IN-trading days
   (no daemon, no pointless 2FA prompt); manual/`--force` spawns stay ungated.
-- **7 Windows Task Scheduler jobs** — `scripts/scheduler/`: 09:35 `serve --gate`, 09:45
-  `snapshot --all` (live), 15:45 `snapshot --all --eod`, 15:50 `trades`, 15:55
-  `export_json.py`, 21:30 `nav refresh`, 21:35 `fx refresh`. Venv-python wrappers
+- **10 Windows Task Scheduler jobs** — `scripts/scheduler/`: 09:35 `serve --gate`, 09:45
+  `snapshot --platform all` (live), 09:50 `export_json.py` (morning refresh), 15:45
+  `snapshot --platform all --eod`, 15:50 `trades`, 15:55
+  `export_json.py`, 21:30 `nav refresh`, 21:35 `fx refresh`, 22:30
+  `snapshot --platform moomoo` (mid-US-session live), 22:35 `export_json.py` (US
+  refresh). Triggers are
+  timezone-anchored to IST (`schtasks /XML`, `+05:30` StartBoundary) — they fire at the
+  same absolute instant regardless of the host timezone. Venv-python wrappers
   (CWD-independent, no `uv run`, no `--force`), per-job logs in gitignored
   `data/logs/`, `register_tasks.ps1` / `unregister_tasks.ps1` / `list_tasks.ps1`
   (idempotent, current-user interactive, paths verified).
@@ -282,6 +288,34 @@ its independent review gate (code-reviewer verdict APPROVE) before advancing.
   through design review.
 - **Verified** — live run against `PROP_BLR_001.json` persisted holding + trades;
   166 passed / 2 skipped, ruff clean on feature code.
+
+## M8.7 — Dashboard revamp round 2: "Journey OS" (in progress, design approved 2026-08-18)
+
+- **Decision:** after a round-2 design exploration (3 directions in
+  `docs/design/round2/`), the user chose the **Hybrid of Direction 2 (Portfolio OS)
+  + Direction 3 (The Journey)** — "land in the story, work in the data." Supersedes
+  the round-1 spec (`docs/design/spec/` stays as history; its component polish is
+  absorbed and implemented once). Decision record:
+  `docs/design/round2/2026-08-18-round2-selected-direction.md`.
+- **Three-pane shell** — `UniversePane` (all holdings, always visible) ·
+  `WorkspaceCenter` · `ContextRail` (allocation donuts + attention rail); a
+  **HealthTicker footer** (per-platform freshness, FX, NAV, runs) replaces StatusBar.
+- **Journey home** — default center workspace: narrated net-worth timeline (ECharts
+  area from `history.json`) with goal milestones (localStorage), Today panel (day
+  P&L in words), account roads, milestone journal. The 6 tabs become center-pane
+  workspace modes (⌘1..⌘6); universe row select opens the HoldingDossier.
+- **Cross-filter donuts** — AllocationLens slices filter the universe + India/US/
+  Returns workspaces; **Journey is never filtered**. ⌘K CommandBar = read-only
+  navigation + local actions only (never pipeline writes).
+- **Light AND dark themes both required** (supersedes the round-1 dark-only note);
+  motion via CSS keyframes + ECharts built-ins only (no Framer Motion); **+50KB
+  bundle budget**; HoldingsTable a11y upgrade (keyboard sort, roving tabindex,
+  in-row sparklines).
+- **Spec:** `docs/design/spec-round2/` (spec.md, tokens.json, motion/,
+  accessibility/, rationale.md); `contract.ts` + `data.ts` untouched.
+- **Status:** implementation in progress (`dashboard-builder`) → `code-reviewer`
+  gate + verification (build / typecheck / lint / check:contract, bundle ≤ +50KB,
+  WCAG AA in both themes).
 
 ---
 

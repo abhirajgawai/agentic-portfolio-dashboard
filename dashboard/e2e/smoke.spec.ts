@@ -41,7 +41,7 @@ async function expectNoHorizontalOverflow(page: Page) {
 }
 
 const SCREENS = [
-  { tab: 'Overview', content: 'Total value' },
+  { tab: 'Journey', content: 'Total value' },
   { tab: 'India', content: 'platform filters + table' },
   { tab: 'US', content: 'Moomoo leg' },
   { tab: 'Returns', content: 'Portfolio simple return' },

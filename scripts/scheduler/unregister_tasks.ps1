@@ -1,4 +1,4 @@
-# unregister_tasks.ps1 - M4 reversal: delete the 7 Portfolio* scheduled tasks
+# unregister_tasks.ps1 - M4 reversal: delete the 10 Portfolio* scheduled tasks
 # created by register_tasks.ps1. Idempotent: a task that does not exist is
 # skipped with a notice, not an error (the schtasks stderr for a missing task
 # is discarded). Re-register anytime with register_tasks.ps1.
@@ -7,10 +7,13 @@
 $TaskNames = @(
     'PortfolioServeZerodha',
     'PortfolioSnapshotMorning',
+    'PortfolioExportJsonMorning',
     'PortfolioSnapshotEod',
     'PortfolioTrades',
     'PortfolioNavRefresh',
     'PortfolioFxRefresh',
+    'PortfolioSnapshotUs',
+    'PortfolioExportJsonUs',
     'PortfolioExportJson'
 )
 
@@ -34,5 +37,5 @@ $remaining = foreach ($name in $TaskNames) {
 if ($remaining) {
     Write-Host ("Still registered: {0}" -f ($remaining -join ', '))
 } else {
-    Write-Host 'All 7 Portfolio* tasks removed.'
+    Write-Host 'All 10 Portfolio* tasks removed.'
 }

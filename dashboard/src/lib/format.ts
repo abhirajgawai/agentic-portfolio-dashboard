@@ -105,6 +105,25 @@ export function formatAsOf(iso: string | null | undefined): string {
   })
 }
 
+/**
+ * Browser-LOCAL short time ("19 Aug, 09:50") for the reload banner — "New data
+ * generated at <local time>". Deliberately NOT pinned to Asia/Kolkata: the
+ * banner tells the user when the background export ran in THEIR wall-clock,
+ * unlike the project's data timestamps (formatAsOf, always IST).
+ * Unparseable input renders as "—".
+ */
+export function formatLocalTime(iso: string | null | undefined): string {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return '—'
+  return d.toLocaleString('en-IN', {
+    day: '2-digit',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
 /** Long form for headers: "14 Aug 2026, 6:30 pm". */
 export function formatAsOfLong(iso: string | null | undefined): string {
   if (!iso) return '—'

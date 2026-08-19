@@ -2,10 +2,13 @@
 pipeline/agent. Lives in the portfolio package so it can import the M7 agent
 client in-process (no proxy hops).
 
-Three endpoints, one job:
+Endpoints:
 
-    GET  /api/health   -> {pipeline: {asOf, exportsPresent}, agent: bool}
+    GET  /api/health   -> {pipeline: {asOf, exportsPresent, exportsGeneratedAt}, agent: bool}
     POST /api/refresh  -> {ok: true, summary} | 502 {ok: false, error}
+    POST /api/cas/import -> {ok: true, import, export} | 502 {ok: false, error}
+    POST /api/property/import -> {ok: true, import, export} | 502 {ok: false, error}
+    DELETE /api/property/{id} -> {ok: true, deleted, export} | 502 {ok: false, error}
     POST /api/ask      -> {answer, toolCalls, turns, withinBudget} | 503
 
 Guardrails:
@@ -19,6 +22,7 @@ Guardrails:
       /api/ask -> OpenCodeClient (M7).
     - No secrets: no tokens are read or echoed here. Agent auth comes from
       OPENCODE_SERVER_PASSWORD via the M7 client's own env handling.
+    - File uploads (CAS PDF) are validated by content type and size.
 """
 
 from __future__ import annotations
@@ -28,8 +32,9 @@ import json
 import logging
 import subprocess
 import sys
+from datetime import UTC, datetime
 
-from fastapi import FastAPI
+from fastapi import FastAPI, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -42,8 +47,15 @@ logger = logging.getLogger("portfolio.bridge")
 app = FastAPI(title="portfolio-dashboard-bridge", version="0.1.0")
 
 # The Vite dev server origin(s) the SPA is served from. /api/* is proxied by
-# Vite, so these matter only for direct cross-origin calls to :8000.
-CORS_ORIGINS = ["http://localhost:5173", "http://127.0.0.1:5173"]
+# Vite, so these matter only for direct cross-origin calls to :8000. Both the
+# 5173 (original) and 5174 (current Vite default port) origins are allowed —
+# the port is not pinned, so a direct fetch from either must not be blocked.
+CORS_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:5174",
+    "http://127.0.0.1:5174",
+]
 
 app.add_middleware(
     CORSMiddleware,
@@ -59,6 +71,8 @@ EXPORT_TIMEOUT_S = 120
 
 DATA_DIR = ROOT_DIR / "dashboard" / "public" / "data"
 
+EXPORT_FILES = ("latest.json", "history.json", "alerts.json", "xirr.json", "performance.json")
+
 
 def _latest_as_of() -> str | None:
     """asOf from the exported latest.json ('' -> None when unreadable)."""
@@ -70,7 +84,19 @@ def _latest_as_of() -> str | None:
 
 
 def _exports_present() -> bool:
-    return all((DATA_DIR / f).is_file() for f in ("latest.json", "history.json", "alerts.json", "xirr.json"))
+    return all((DATA_DIR / f).is_file() for f in EXPORT_FILES)
+
+
+def _exports_generated_at() -> str | None:
+    """Latest mtime across the export files, ISO UTC — "when the dashboard data
+    was last regenerated". The reload banner keys on THIS advancing: it must be
+    the FILE time (the files actually changed), not the pipeline asOf (a run
+    time that can advance without any export). None when no export exists yet."""
+    try:
+        mtimes = [(DATA_DIR / f).stat().st_mtime for f in EXPORT_FILES if (DATA_DIR / f).is_file()]
+    except OSError:
+        return None
+    return datetime.fromtimestamp(max(mtimes), tz=UTC).isoformat() if mtimes else None
 
 
 @app.get("/api/health")
@@ -78,7 +104,11 @@ async def health() -> dict:
     """Pipeline freshness (export files) + agent reachability (M7 client)."""
     agent = await OpenCodeClient().health()
     return {
-        "pipeline": {"asOf": _latest_as_of(), "exportsPresent": _exports_present()},
+        "pipeline": {
+            "asOf": _latest_as_of(),
+            "exportsPresent": _exports_present(),
+            "exportsGeneratedAt": _exports_generated_at(),
+        },
         "agent": agent,
     }
 
@@ -330,6 +360,85 @@ finally:
         return JSONResponse(status_code=502, content={"ok": False, "error": "delete timed out"})
     except Exception as exc:  # noqa: BLE001
         logger.exception("property delete failed")
+        return JSONResponse(status_code=502, content={"ok": False, "error": f"{type(exc).__name__}: {exc}"})
+
+
+@app.post("/api/cas/import")
+async def cas_import(file: UploadFile, password: str = "") -> JSONResponse:
+    """Import a CAS PDF (Consolidated Account Statement) — the free monthly
+    Groww/IN holdings path (stocks + MFs).
+
+    Accepts a PDF file upload (CAS is emailed monthly as a PDF), runs `portfolio
+    cas import` on a temp file, then regenerates the dashboard exports.
+    The PDF never leaves this machine (casparser is fully offline).
+    """
+    import os
+    import tempfile
+
+    # Security: validate file type and size
+    if not file.filename:
+        return JSONResponse(status_code=400, content={"ok": False, "error": "No file provided"})
+    if not file.filename.lower().endswith(".pdf"):
+        return JSONResponse(status_code=400, content={"ok": False, "error": "Only PDF files are allowed"})
+    content = await file.read()
+    if len(content) > 10 * 1024 * 1024:  # 10MB limit
+        return JSONResponse(status_code=400, content={"ok": False, "error": "File too large (max 10MB)"})
+
+    try:
+        # Write the uploaded PDF to a temp file
+        with tempfile.NamedTemporaryFile(mode="wb", suffix=".pdf", delete=False) as f:
+            f.write(content)
+            temp_path = f.name
+
+        try:
+            # Run CAS import CLI
+            import_result = subprocess.run(
+                [sys.executable, "-m", "portfolio.cli", "cas", "import", temp_path,
+                 "--password", password] if password else
+                [sys.executable, "-m", "portfolio.cli", "cas", "import", temp_path],
+                capture_output=True,
+                text=True,
+                timeout=600,  # CAS PDF parsing can be slow
+                cwd=ROOT_DIR,
+            )
+
+            if import_result.returncode != 0:
+                logger.error("CAS import failed: %s", import_result.stderr)
+                return JSONResponse(
+                    status_code=502,
+                    content={"ok": False, "error": f"CAS import failed: {import_result.stderr[-500:]}"},
+                )
+
+            # Regenerate dashboard exports
+            export_result = subprocess.run(
+                [sys.executable, "scripts/export_json.py"],
+                capture_output=True,
+                text=True,
+                timeout=120,
+                cwd=ROOT_DIR,
+            )
+
+            if export_result.returncode != 0:
+                logger.error("export_json failed after CAS import: %s", export_result.stderr)
+                return JSONResponse(
+                    status_code=502,
+                    content={"ok": False, "error": f"export failed: {export_result.stderr[-500:]}"},
+                )
+
+            return JSONResponse(
+                content={
+                    "ok": True,
+                    "import": import_result.stdout.strip()[-2000:],
+                    "export": export_result.stdout.strip()[-2000:],
+                }
+            )
+        finally:
+            os.unlink(temp_path)
+    except subprocess.TimeoutExpired:
+        logger.error("CAS import timed out")
+        return JSONResponse(status_code=502, content={"ok": False, "error": "import timed out (600s)"})
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("CAS import failed")
         return JSONResponse(status_code=502, content={"ok": False, "error": f"{type(exc).__name__}: {exc}"})
 
 

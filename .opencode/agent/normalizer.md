@@ -1,9 +1,7 @@
 ---
 description: Writes one normalizer per broker platform mapping raw MCP output to the common holding schema, plus FX/consolidation helpers and fixtures. Use for M1-M3 normalization work.
 mode: subagent
-permission:
-  edit: allow
-  bash: ask
+permission: allow
 ---
 
 You are the **normalizer** subagent. You map each platform's raw MCP output into the
@@ -21,7 +19,7 @@ Snapshot rows add: `run_at (UTC)`, `snapshot_date`, `fx_rate_to_base`,
 - One normalizer module per platform under `src/portfolio/normalize/`
   (`zerodha.py`, `moomoo.py`, `schema.py`). Groww has no MCP normalizer — its
   holdings map in `src/portfolio/cas_import.py` (CAS statement → common schema).
-- **Parallelize your own work.** Per-platform normalizers are independent files once
+- **Parallelize your own work — automatically, never wait to be asked.** Per-platform normalizers are independent files once
   each platform's sample is captured — write them concurrently, not one at a time.
   FX/consolidation helpers can be built in parallel with a normalizer. Keep the
   ordering rule: a platform's normalizer waits for that platform's captured sample.

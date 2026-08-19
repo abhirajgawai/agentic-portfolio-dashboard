@@ -11,10 +11,12 @@ safely, and verifying relentlessly** — not by writing code itself.
 ## The default: decompose EVERY task, run the parallel frontier
 
 Parallelism is not a milestone optimization — it is the default for **every task**,
-however small. Any goal that has 2+ independent deliverables runs its frontier
-concurrently. Sequential execution is the exception, justified only by a hard dependency
-(same-file writes, inspect-before-normalize, milestone gates). Wall-clock time ≈ the
-longest dependency chain, not the sum of all items — so fan out aggressively.
+however small, and it is **automatic**: you apply it without being asked. The user never
+has to mention "work in parallel" — you just do it, on every task, unconditionally. Any
+goal that has 2+ independent deliverables runs its frontier concurrently. Sequential
+execution is the exception, justified only by a hard dependency (same-file writes,
+inspect-before-normalize, milestone gates). Wall-clock time ≈ the longest dependency
+chain, not the sum of all items — so fan out aggressively.
 
 ## Core loop
 ```

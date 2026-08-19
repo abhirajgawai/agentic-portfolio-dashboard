@@ -1,60 +1,161 @@
 @import "tailwindcss";
 
 /* ------------------------------------------------------------------ */
-/* M8 dashboard theme — Tailwind v4 + shadcn/ui v4 conventions.       */
+/* Dashboard theme — Tailwind v4 + shadcn/ui v4 conventions.          */
 /* Tailwind v4 is configured in CSS, not tailwind.config.js:          */
 /*   - @theme inline maps the CSS custom properties to Tailwind       */
 /*     utilities (bg-background, text-foreground, border-border, ...) */
 /*   - @custom-variant enables the `.dark` variant used by shadcn.    */
-/* The dashboard is dark-only (Linear/Vercel aesthetic), so :root     */
-/* below ARE the dark tokens (no light theme defined).                */
+/* The dashboard supports both light and dark themes.                 */
 /* ------------------------------------------------------------------ */
 
 @custom-variant dark (&:is(.dark *));
 
+/* ================================================================== */
+/* DESIGN TOKENS — tokens.json is the source of truth.                */
+/* Light tokens live in :root (default). Dark tokens live in .dark.   */
+/* The theme provider toggles .dark on <html>.                        */
+/* ================================================================== */
+
 :root {
   --radius: 0.625rem;
 
+  /* ---- light palette ---- */
+  --background: oklch(0.985 0.002 285);
+  --foreground: oklch(0.21 0.01 285);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.21 0.01 285);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.21 0.01 285);
+  --primary: oklch(0.55 0.18 262);
+  --primary-foreground: oklch(0.985 0.002 285);
+  --secondary: oklch(0.94 0.008 285);
+  --secondary-foreground: oklch(0.25 0.01 285);
+  --muted: oklch(0.955 0.005 285);
+  --muted-foreground: oklch(0.47 0.012 285);
+  --accent: oklch(0.93 0.01 285);
+  --accent-foreground: oklch(0.25 0.01 285);
+  --destructive: oklch(0.55 0.19 25);
+  --destructive-foreground: oklch(0.985 0.002 285);
+  --border: oklch(0.9 0.008 285);
+  --input: oklch(0.88 0.01 285);
+  --ring: oklch(0.55 0.18 262);
+
+  /* Finance semantics */
+  --gain: oklch(0.52 0.14 155);
+  --loss: oklch(0.55 0.19 25);
+  --warning: oklch(0.62 0.15 85);
+
+  /* Categorical chart palette */
+  --chart-1: oklch(0.55 0.18 262);
+  --chart-2: oklch(0.52 0.14 155);
+  --chart-3: oklch(0.62 0.15 85);
+  --chart-4: oklch(0.55 0.19 25);
+  --chart-5: oklch(0.6 0.14 300);
+  --chart-6: oklch(0.45 0.12 230);
+  --chart-7: oklch(0.5 0.12 20);
+  --chart-8: oklch(0.58 0.1 160);
+  --chart-9: oklch(0.48 0.1 300);
+
+  /* Shadows (light) */
+  --shadow-xs: 0 1px 2px 0 oklch(0.21 0.01 285 / 0.05);
+  --shadow-sm: 0 1px 3px 1px oklch(0.21 0.01 285 / 0.07), 0 1px 2px oklch(0.21 0.01 285 / 0.05);
+  --shadow-md: 0 4px 8px oklch(0.21 0.01 285 / 0.08), 0 2px 4px oklch(0.21 0.01 285 / 0.05);
+  --shadow-lg: 0 10px 20px oklch(0.21 0.01 285 / 0.1), 0 4px 8px oklch(0.21 0.01 285 / 0.06);
+  --shadow-focus: 0 0 0 2px oklch(0.55 0.18 262 / 0.4);
+
+  /* Shared timing */
+  --duration-fast: 150ms;
+  --duration-base: 250ms;
+  --duration-slow: 400ms;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* Spacing scale */
+  --spacing-1: 4px;
+  --spacing-2: 8px;
+  --spacing-3: 12px;
+  --spacing-4: 16px;
+  --spacing-5: 24px;
+  --spacing-6: 32px;
+  --spacing-7: 48px;
+  --spacing-8: 64px;
+
+  /* Type scale */
+  --text-2xs: 0.6875rem;
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-md: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.375rem;
+  --text-2xl: 1.75rem;
+
+  /* Z-index scale */
+  --z-dropdown: 1000;
+  --z-sticky: 1100;
+  --z-modal: 1200;
+  --z-popover: 1300;
+  --z-toast: 1400;
+  --z-commandBar: 1500;
+
+  /* Table density (default = comfortable) */
+  --row-height: 3rem;
+  --row-padding-y: 8px;
+  --row-padding-x: 12px;
+  --table-font-size: 0.8125rem;
+}
+
+/* ==== DARK THEME ==== */
+.dark {
   --background: oklch(0.13 0.006 285);
   --foreground: oklch(0.97 0.004 285);
-
-  --card: oklch(0.165 0.007 285);
+  --card: oklch(0.155 0.008 285);
   --card-foreground: oklch(0.97 0.004 285);
-
   --popover: oklch(0.165 0.007 285);
   --popover-foreground: oklch(0.97 0.004 285);
-
-  --primary: oklch(0.68 0.16 262);
+  --primary: oklch(0.70 0.16 262);
   --primary-foreground: oklch(0.98 0.004 285);
-
   --secondary: oklch(0.235 0.01 285);
   --secondary-foreground: oklch(0.93 0.005 285);
-
   --muted: oklch(0.215 0.008 285);
-  --muted-foreground: oklch(0.66 0.012 285);
-
+  --muted-foreground: oklch(0.68 0.012 285);
   --accent: oklch(0.25 0.012 285);
   --accent-foreground: oklch(0.95 0.004 285);
-
   --destructive: oklch(0.6 0.2 25);
   --destructive-foreground: oklch(0.98 0.004 285);
-
-  --border: oklch(0.26 0.012 285);
+  --border: oklch(0.24 0.012 285);
   --input: oklch(0.26 0.012 285);
-  --ring: oklch(0.68 0.16 262);
+  --ring: oklch(0.70 0.16 262);
 
-  /* Finance semantics — gains/losses are first-class colors */
-  --gain: oklch(0.72 0.15 155);
-  --loss: oklch(0.63 0.2 25);
-  --warning: oklch(0.8 0.14 85);
+  /* Finance semantics (dark) */
+  --gain: oklch(0.74 0.14 155);
+  --loss: oklch(0.70 0.17 25);
+  --warning: oklch(0.82 0.13 85);
 
-  /* Categorical chart palette (dark-friendly, distinct hues) */
+  /* Categorical chart palette (dark) */
   --chart-1: oklch(0.68 0.16 262);
-  --chart-2: oklch(0.72 0.15 155);
-  --chart-3: oklch(0.8 0.14 85);
-  --chart-4: oklch(0.66 0.18 20);
+  --chart-2: oklch(0.74 0.14 155);
+  --chart-3: oklch(0.82 0.13 85);
+  --chart-4: oklch(0.7 0.17 25);
   --chart-5: oklch(0.75 0.12 300);
+  --chart-6: oklch(0.62 0.15 230);
+  --chart-7: oklch(0.7 0.15 20);
+  --chart-8: oklch(0.72 0.1 160);
+  --chart-9: oklch(0.65 0.14 300);
+
+  /* Shadows (dark) */
+  --shadow-xs: 0 1px 2px 0 oklch(0 0 0 / 0.4);
+  --shadow-sm: 0 1px 3px oklch(0 0 0 / 0.5), 0 1px 2px oklch(0 0 0 / 0.4);
+  --shadow-md: 0 4px 8px oklch(0 0 0 / 0.5), 0 2px 4px oklch(0 0 0 / 0.4);
+  --shadow-lg: 0 10px 20px oklch(0 0 0 / 0.55), 0 4px 8px oklch(0 0 0 / 0.4);
+  --shadow-focus: 0 0 0 2px oklch(0.70 0.16 262 / 0.4);
 }
+
+/* ================================================================== */
+/* @theme inline — maps CSS custom properties to Tailwind utilities.   */
+/* Without this, bg-background, text-foreground, border-border, etc.  */
+/* resolve to nothing.                                                 */
+/* ================================================================== */
 
 @theme inline {
   --color-background: var(--background);
@@ -84,6 +185,10 @@
   --color-chart-3: var(--chart-3);
   --color-chart-4: var(--chart-4);
   --color-chart-5: var(--chart-5);
+  --color-chart-6: var(--chart-6);
+  --color-chart-7: var(--chart-7);
+  --color-chart-8: var(--chart-8);
+  --color-chart-9: var(--chart-9);
 
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
@@ -91,12 +196,16 @@
   --radius-xl: calc(var(--radius) + 4px);
 }
 
+/* ================================================================== */
+/* BASE LAYER — body styles, focus ring, scrollbar.                    */
+/* ================================================================== */
+
 @layer base {
   * {
     @apply border-border;
   }
   html {
-    color-scheme: dark;
+    color-scheme: light dark;
   }
   body {
     @apply bg-background text-foreground antialiased;
@@ -116,8 +225,70 @@
   }
 }
 
-/* Thin dark scrollbars for the chat drawer + tables */
+/* Thin scrollbars for tables + chat drawer */
 * {
   scrollbar-width: thin;
+  scrollbar-color: oklch(0.7 0.008 285) transparent;
+}
+.dark * {
   scrollbar-color: oklch(0.3 0.01 285) transparent;
+}
+
+/* ================================================================== */
+/* REDUCED MOTION — disable all animation for a11y.                    */
+/* ================================================================== */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .echarts * {
+    animation: none !important;
+  }
+  .sonner-toast {
+    animation: none !important;
+  }
+}
+
+/* ================================================================== */
+/* DENSITY CONTROLS — toggled via data-density on <html>.              */
+/* ================================================================== */
+
+[data-density="comfortable"] {
+  --row-height: 3rem;
+  --row-padding-y: 8px;
+}
+[data-density="compact"] {
+  --row-height: 2.25rem;
+  --row-padding-y: 4px;
+}
+
+/* ================================================================== */
+/* Z-INDEX UTILITY CLASSES                                             */
+/* ================================================================== */
+
+.z-dropdown { z-index: var(--z-dropdown); }
+.z-sticky   { z-index: var(--z-sticky); }
+.z-modal    { z-index: var(--z-modal); }
+.z-popover  { z-index: var(--z-popover); }
+.z-toast    { z-index: var(--z-toast); }
+.z-commandBar { z-index: var(--z-commandBar); }
+
+/* ================================================================== */
+/* SIDEBAR COLLAPSE — toggled on UniversePane / ContextRail wrappers  */
+/* ================================================================== */
+
+.collapsed {
+  width: 0;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    width var(--duration-base) var(--ease-out),
+    opacity var(--duration-fast);
 }

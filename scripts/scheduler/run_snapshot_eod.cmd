@@ -6,4 +6,4 @@ REM --eod marks the run as end-of-day so the M8 trend series prices it.
 setlocal
 set "ROOT=%~dp0..\.."
 if not exist "%ROOT%\data\logs" mkdir "%ROOT%\data\logs"
-"%ROOT%\.venv\Scripts\python.exe" -m portfolio.cli snapshot --all --eod >> "%ROOT%\data\logs\snapshot_eod.log" 2>&1
+"%ROOT%\.venv\Scripts\python.exe" -m portfolio.cli snapshot --platform all --eod >> "%ROOT%\data\logs\snapshot_eod.log" 2>&1

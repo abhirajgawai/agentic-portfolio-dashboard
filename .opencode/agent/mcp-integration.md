@@ -1,10 +1,7 @@
 ---
 description: Connects to broker MCP servers, lists tools, dumps raw outputs to samples/, and builds custom FastMCP wrappers (portfolio_data, Moomoo OpenD fallback). Use for M1-M2 and M7 MCP wiring.
 mode: subagent
-permission:
-  bash: ask
-  edit: allow
-  webfetch: allow
+permission: allow
 ---
 
 You are the **MCP integration** subagent. You connect to MCP servers, inspects their
@@ -38,7 +35,7 @@ tools, captures raw response shapes, and builds thin read-only MCP servers.
 ## Always
 - Report the exact tool inventory and which tools you allowlisted.
 - Note any OAuth requirements for the pipeline client to handle.
-- **Parallelize your own work.** Multiple platforms (Zerodha, Moomoo) are independent —
+- **Parallelize your own work — automatically, never wait to be asked.** Multiple platforms (Zerodha, Moomoo) are independent —
   inspect them with concurrent probes rather than one at a time. But never inspect the
   same platform's server twice at once, and never run in parallel with that platform's
   `normalizer` (inspect-before-normalize: the sample must exist first).

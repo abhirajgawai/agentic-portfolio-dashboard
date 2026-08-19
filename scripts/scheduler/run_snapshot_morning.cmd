@@ -5,4 +5,4 @@ REM skips holidays/weekends (logged inside the pipeline, not here) - no --force.
 setlocal
 set "ROOT=%~dp0..\.."
 if not exist "%ROOT%\data\logs" mkdir "%ROOT%\data\logs"
-"%ROOT%\.venv\Scripts\python.exe" -m portfolio.cli snapshot --all >> "%ROOT%\data\logs\snapshot_morning.log" 2>&1
+"%ROOT%\.venv\Scripts\python.exe" -m portfolio.cli snapshot --platform all >> "%ROOT%\data\logs\snapshot_morning.log" 2>&1
