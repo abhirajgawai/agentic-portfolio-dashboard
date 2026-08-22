@@ -34,7 +34,8 @@ def _seed(conn) -> None:
     """Mixed-frequency legs: 3 platforms on date A, 2 (different) on date B.
 
     Date A (2026-08-06): zerodha 100, groww 200, moomoo 300  -> all = 600
-    Date B (2026-08-07): sharekhan 50, moomoo 250            -> all = 300
+    Date B (2026-08-07): sharekhan 50, moomoo 250; zerodha and groww are
+    absent, so their Date A values carry forward -> all = 600.
     """
     spec = [
         ("2026-08-06", "zerodha", "IN", "", 100.0),
@@ -72,16 +73,69 @@ def test_series_mixed_frequency_dates_are_honest(db) -> None:
         conn.close()
 
     assert series["dates"] == ["2026-08-06", "2026-08-07"]
-    assert series["portfolioValueBase"] == [600.0, 300.0]
-    # Date A must NOT include date B rows (sharekhan 50 / moomoo 250).
-    assert series["byGeography"] == {"IN": [300.0, 50.0], "US": [300.0, 250.0]}
+    assert series["portfolioValueBase"] == [600.0, 600.0]
+    # Date B carries zerodha 100 and groww 200; it does not treat their
+    # missing snapshots as zero.
+    assert series["byGeography"] == {"IN": [300.0, 350.0], "US": [300.0, 250.0]}
     assert series["byPlatform"] == {
-        "groww": [200.0, 0.0],
+        "groww": [200.0, 200.0],
         "moomoo": [300.0, 250.0],
         "sharekhan": [0.0, 50.0],
-        "zerodha": [100.0, 0.0],
+        "zerodha": [100.0, 100.0],
     }
     # Per-date invariant: all == sum(platform) == sum(geography).
+    for i in range(len(series["dates"])):
+        assert series["portfolioValueBase"][i] == pytest.approx(
+            sum(p[i] for p in series["byPlatform"].values())
+        )
+        assert series["portfolioValueBase"][i] == pytest.approx(
+            sum(g[i] for g in series["byGeography"].values())
+        )
+
+
+def test_series_carries_complete_multi_instrument_platform_snapshot(db) -> None:
+    """A missing platform date carries its complete prior instrument aggregate."""
+    conn = connect(db)
+    try:
+        # Zerodha's first snapshot is complete: both instruments belong to the
+        # platform and must be carried together when Zerodha is absent later.
+        for i, value in enumerate((100.0, 250.0)):
+            run_id = writer.write_run(
+                conn, "zerodha", "2026-08-06", f"run-zerodha-{i}", "ok",
+                rows=2, is_eod=True,
+            )
+            account = writer.ensure_account(conn, "zerodha", account_ref="")
+            instrument = writer.ensure_instrument(
+                conn, "zerodha", f"ZERODHA-{i}", currency="INR", geography="IN",
+            )
+            writer.upsert_position_snapshot(
+                conn, run_id, account, instrument, None, "2026-08-06",
+                quantity=1.0, avg_cost=value, price=value,
+                cost_value_ccy=value, market_value_ccy=value,
+                market_value_base=value, cost_value_base=value,
+            )
+
+        run_id = writer.write_run(
+            conn, "moomoo", "2026-08-07", "run-moomoo", "ok", rows=1, is_eod=True,
+        )
+        account = writer.ensure_account(conn, "moomoo", account_ref="ACC-1", base_currency="SGD")
+        instrument = writer.ensure_instrument(
+            conn, "moomoo", "MOOMOO-0", currency="USD", geography="US",
+        )
+        writer.upsert_position_snapshot(
+            conn, run_id, account, instrument, None, "2026-08-07",
+            quantity=1.0, avg_cost=75.0, price=75.0,
+            cost_value_ccy=75.0, market_value_ccy=75.0,
+            market_value_base=75.0, cost_value_base=75.0,
+        )
+        series = portfolio_series(conn, "INR")
+    finally:
+        conn.close()
+
+    assert series["dates"] == ["2026-08-06", "2026-08-07"]
+    assert series["byPlatform"]["zerodha"] == [350.0, 350.0]
+    assert series["portfolioValueBase"] == [350.0, 425.0]
+    assert series["byGeography"] == {"IN": [350.0, 350.0], "US": [0.0, 75.0]}
     for i in range(len(series["dates"])):
         assert series["portfolioValueBase"][i] == pytest.approx(
             sum(p[i] for p in series["byPlatform"].values())

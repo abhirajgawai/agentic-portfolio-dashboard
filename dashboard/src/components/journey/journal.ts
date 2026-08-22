@@ -10,6 +10,7 @@
  *    is labeled "partial snapshot" (some legs did not run that day);
  *  - crossings are generic ₹10L boundaries — "Crossed ₹1Cr" appears only
  *    when the ledger actually crosses it (deterministic, never invented).
+ *  - ATH fires only on genuine new peaks; recovery fires once per drawdown cycle.
  */
 
 import { formatInrCompact } from '@/lib/format'
@@ -49,14 +50,16 @@ const PLATFORM_LABELS: Record<string, string> = {
   real_estate: 'Real estate',
 }
 
-function platformLabel(platform: string): string {
+export function platformLabel(platform: string): string {
   return PLATFORM_LABELS[platform] ?? platform
 }
 
-/** Crossing boundaries — every ₹10L bucket up to ₹1Cr. */
+/** Crossing boundaries — ₹10L steps up to ₹1Cr, then major milestones beyond. */
 const CROSS_LEVELS = [
   30_00_000, 40_00_000, 50_00_000, 60_00_000, 70_00_000,
   80_00_000, 90_00_000, 1_00_00_000,
+  2_00_00_000, 3_00_00_000, 5_00_00_000, 7_00_00_000,
+  10_00_00_000, 15_00_00_000, 25_00_00_000, 50_00_00_000,
 ] as const
 
 function dayDiff(a: string, b: string): number {
@@ -75,7 +78,7 @@ function platformCountAt(history: History, index: number): number {
 }
 
 /**
- * Milestones for the chart: platform first appearances + threshold crossings.
+ * Milestones for the chart: threshold crossings + all-time highs + drawdown recoveries.
  * (One per event — the chart dedupes by index for pin spacing.)
  */
 export function deriveMilestones(history: History): Milestone[] {
@@ -83,24 +86,17 @@ export function deriveMilestones(history: History): Milestone[] {
   const dates = history.dates
   const values = history.portfolioValueBase
 
-  for (const [platform, series] of Object.entries(history.byPlatform)) {
-    const idx = series.findIndex((v) => v > 0)
-    if (idx === -1) continue
-    out.push({
-      id: `appear:${platform}`,
-      date: dates[idx] ?? '—',
-      index: idx,
-      value: values[idx] ?? 0,
-      description: `${platformLabel(platform)} leg added (+${formatInrCompact(values[idx] ?? 0)})`,
-    })
-  }
-
+  // --- 1. Threshold crossings (extended beyond ₹1Cr) ---
+  const crossedLevels = new Set<number>()
   for (let i = 1; i < dates.length; i += 1) {
     const lo = Math.min(values[i - 1] ?? 0, values[i] ?? 0)
     const hi = Math.max(values[i - 1] ?? 0, values[i] ?? 0)
     const crossed = CROSS_LEVELS.filter((level) => level > lo && level <= hi)
     if (crossed.length === 0) continue
+    // One per day, highest level crossed (same rule as before)
     const level = crossed[crossed.length - 1] ?? 0
+    if (crossedLevels.has(level)) continue // only first crossing fires
+    crossedLevels.add(level)
     out.push({
       id: `cross:${dates[i]}:${level}`,
       date: dates[i] ?? '—',
@@ -110,6 +106,83 @@ export function deriveMilestones(history: History): Milestone[] {
     })
   }
 
+  // --- 2. All-Time High (ATH) milestones ---
+  let runningMax = -Infinity
+  for (let i = 0; i < values.length; i += 1) {
+    const v = values[i] ?? 0
+    if (v > runningMax) {
+      runningMax = v
+      if (i > 0) { // skip day 0 (no prior peak to exceed)
+        out.push({
+          id: `ath:${dates[i]}`,
+          date: dates[i] ?? '—',
+          index: i,
+          value: v,
+          description: `New all-time high: ${formatInrCompact(v)}`,
+        })
+      }
+    }
+  }
+
+  // --- 3. Drawdown Recovery milestones ---
+  // Track peak-to-trough drawdowns; fire once when recovery reaches within 1% of peak.
+  let peakValue = values[0] ?? 0
+  let peakIndex = 0
+  let inDrawdown = false
+  let troughValue = peakValue
+  let troughIndex = peakIndex
+  const recoveredDrawdowns = new Set<string>()
+
+  for (let i = 1; i < values.length; i += 1) {
+    const v = values[i] ?? 0
+
+    if (!inDrawdown) {
+      // Look for a new peak
+      if (v > peakValue) {
+        peakValue = v
+        peakIndex = i
+      } else {
+        // Check if we've entered a drawdown > 10%
+        const ddPct = ((peakValue - v) / peakValue) * 100
+        if (ddPct > 10) {
+          inDrawdown = true
+          troughValue = v
+          troughIndex = i
+        }
+      }
+    } else {
+      // In a drawdown — track the trough
+      if (v < troughValue) {
+        troughValue = v
+        troughIndex = i
+      }
+
+      // Check for recovery to within 1% of the peak
+      const recoveryPct = ((v - peakValue) / peakValue) * 100
+      if (recoveryPct >= -1) {
+        const ddKey = `${peakIndex}-${troughIndex}`
+        if (!recoveredDrawdowns.has(ddKey)) {
+          const drawdownPct = ((peakValue - troughValue) / peakValue) * 100
+          out.push({
+            id: `recovery:${dates[i]}`,
+            date: dates[i] ?? '—',
+            index: i,
+            value: v,
+            description: `Recovered from ${drawdownPct.toFixed(1)}% drawdown`,
+          })
+          recoveredDrawdowns.add(ddKey)
+        }
+        // Reset for next potential drawdown
+        inDrawdown = false
+        peakValue = v
+        peakIndex = i
+        troughValue = v
+        troughIndex = i
+      }
+    }
+  }
+
+  // Sort by date then id for deterministic output
   out.sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id))
   return out
 }

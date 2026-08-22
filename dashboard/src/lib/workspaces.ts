@@ -1,35 +1,40 @@
 /**
- * src/lib/workspaces.ts — Workspace registry: journey | allocation | holdings | returns | alerts | properties
+ * src/lib/workspaces.ts — Workspace registry: journey | allocation | portfolio | returns | alerts | properties
  * + dossier:<ticker> transient state. useWorkspace hook; command-bar items built
  * from this registry.
  */
 
 import { useState, useEffect } from 'react'
+import { type LucideIcon } from 'lucide-react'
 
 export type WorkspaceId =
   | 'journey'
   | 'allocation'
-  | 'holdings'
-  | 'india'
-  | 'us'
+  | 'portfolio'
   | 'returns'
   | 'alerts'
   | 'properties'
-  | 'cas'
 
 export type TransientDossier = {
   ticker: string | null
   previousWorkspace: WorkspaceId | null
 }
 
-export const WORKSPACES: { id: WorkspaceId; label: string }[] = [
+export interface WorkspaceDescriptor {
+  id: WorkspaceId
+  label: string
+  /** Optional icon — consumed by the CommandBar (spec.md §3.8 builds its items
+   *  from this registry). The Header segmented control stays text-only. */
+  icon?: LucideIcon
+}
+
+export const WORKSPACES: WorkspaceDescriptor[] = [
   { id: 'journey', label: 'Journey' },
-  { id: 'india', label: 'India' },
-  { id: 'us', label: 'US' },
+  { id: 'allocation', label: 'Allocation' },
+  { id: 'portfolio', label: 'Portfolio' },
   { id: 'returns', label: 'Returns' },
   { id: 'alerts', label: 'Alerts' },
   { id: 'properties', label: 'Properties' },
-  { id: 'cas', label: 'CAS Import' },
 ]
 
 export function useWorkspace(

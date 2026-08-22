@@ -1,10 +1,14 @@
-/** Header metric cards — total value, day P&L, simple return, XIRR. */
+/** Header metric cards — total value, day P&L, simple return, XIRR.
+ *  The Day P&L headline and its "Breakdown" affordance open the per-platform
+ *  day-P&L dialog (DayPnlBreakdownDialog) — pure client-side derivation. */
 
+import { useState } from 'react'
 import { ArrowDownRight, ArrowUpRight, Minus, TrendingUp } from 'lucide-react'
 
+import { DayPnlBreakdownDialog } from '@/components/overview/DayPnlBreakdownDialog'
 import { Card, CardDescription, CardTitle } from '@/components/ui/card'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { formatInr, formatInrCompact, formatInrPrecise, formatPct, MASK_TEXT } from '@/lib/format'
+import { formatInr, formatInrCompact, formatMoney, formatPct, MASK_TEXT } from '@/lib/format'
 import { usePrivacy } from '@/lib/privacy'
 import { simpleReturn } from '@/lib/returns'
 import type { Latest, Xirr } from '@/types/contract'
@@ -67,9 +71,11 @@ export function OverviewCards({ latest, xirr }: { latest: Latest; xirr: Xirr | u
   const accountCurrencies = Object.entries(totals.byAccountCurrency)
   const dayPnlCurrencies = Object.entries(totals.dayPnlByAccountCurrency)
   const { masked } = usePrivacy()
+  const [breakdownOpen, setBreakdownOpen] = useState(false)
 
   return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+    <>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
       <CardShell
         title="Total value"
         hint="Consolidated portfolio value in the base currency (INR), across all platforms."
@@ -86,17 +92,34 @@ export function OverviewCards({ latest, xirr }: { latest: Latest; xirr: Xirr | u
         title="Day P&L"
         hint="Sum of per-holding day P&L converted to the base currency (same-run FX)."
         headline={
-          <span className={cn('flex items-center gap-1', totals.dayPnl > 0 ? 'text-gain' : totals.dayPnl < 0 ? 'text-loss' : '')}>
+          <button
+            type="button"
+            onClick={() => setBreakdownOpen(true)}
+            aria-label="Show day P&L breakdown"
+            className={cn(
+              'flex items-center gap-1 rounded-sm text-left transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring cursor-pointer',
+              totals.dayPnl > 0 ? 'text-gain' : totals.dayPnl < 0 ? 'text-loss' : '',
+            )}
+          >
             <DeltaIcon value={totals.dayPnl} />
             {masked ? MASK_TEXT : formatInrCompact(totals.dayPnl)}
-          </span>
+          </button>
         }
         headlineClass={totals.dayPnl >= 0 ? 'text-gain' : 'text-loss'}
         sub={
           <span className="text-[11px]">
             {dayPnlCurrencies.length > 0
-              ? dayPnlCurrencies.map(([ccy, v]) => `${ccy} ${masked ? MASK_TEXT : formatInrPrecise(v)}`).join(' / ')
+              ? dayPnlCurrencies.map(([ccy, v]) => `${ccy} ${masked ? MASK_TEXT : formatMoney(v, ccy)}`).join(' / ')
               : 'no day P&L data'}
+            {' · '}
+            <button
+              type="button"
+              onClick={() => setBreakdownOpen(true)}
+              aria-label="Show day P&L breakdown"
+              className="rounded-sm font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring cursor-pointer"
+            >
+              Breakdown
+            </button>
           </span>
         }
       />
@@ -136,6 +159,8 @@ export function OverviewCards({ latest, xirr }: { latest: Latest; xirr: Xirr | u
           </span>
         }
       />
-    </div>
+      </div>
+      <DayPnlBreakdownDialog latest={latest} open={breakdownOpen} onOpenChange={setBreakdownOpen} />
+    </>
   )
 }

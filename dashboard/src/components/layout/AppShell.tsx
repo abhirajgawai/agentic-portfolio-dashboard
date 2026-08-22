@@ -5,7 +5,7 @@
  * Sidebars removed — Holdings and Allocation live in dedicated tabs now.
  */
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useTheme } from '@/lib'
 import { useLatest } from '@/lib/data'
 import { useRefresh } from '@/lib/useRefresh'
@@ -31,11 +31,24 @@ export function AppShell() {
     if (refresh.state.status === 'done') setManualRefreshCount((c) => c + 1)
   }, [refresh.state.status])
 
-  // Workspace state (lifted from WorkspaceCenter)
+  // Workspace state (lifted so Header tabs + WorkspaceCenter content stay in sync)
   const { workspace, setWorkspace, setTransientDossier } = useWorkspace('journey')
 
   // Chat drawer open state
   const [chatOpen, setChatOpen] = useState(false)
+
+  // Focus management: when chatOpen transitions false, return focus to the
+  // header toggle (stable id="chat-toggle"). Never move focus on OPEN — the
+  // drawer's own textarea autofocus handles that. The wasOpen ref skips the
+  // initial mount (chatOpen starts false; we must not steal focus on load).
+  const prevChatOpen = useRef(chatOpen)
+  useEffect(() => {
+    const wasOpen = prevChatOpen.current
+    prevChatOpen.current = chatOpen
+    if (wasOpen && !chatOpen) {
+      document.getElementById('chat-toggle')?.focus()
+    }
+  }, [chatOpen])
 
   // Persist theme on change
   useEffect(() => {
@@ -46,20 +59,19 @@ export function AppShell() {
 
   return (
     <div className="flex flex-col h-screen bg-background text-foreground">
-      {/* ==== HEADER ==== */}
+      {/* ==== HEADER (with workspace tabs) ==== */}
       <Header
         chatOpen={chatOpen}
         onChatToggle={() => setChatOpen((v) => !v)}
         workspace={workspace}
         onWorkspaceChange={setWorkspace}
         refresh={refresh}
-        health={health}
       />
 
       {/* ==== NEW-DATA RELOAD NOTICE ==== */}
       <RefreshNotice health={health} manualRefreshCount={manualRefreshCount} />
 
-      {/* ==== WORKSPACE (full width, no sidebars) ==== */}
+      {/* ==== WORKSPACE CONTENT (full width, no sidebars) ==== */}
       <div className="relative z-0 flex h-0 flex-1">
         <WorkspaceCenter
           workspace={workspace}

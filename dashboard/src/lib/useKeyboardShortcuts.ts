@@ -1,7 +1,9 @@
 /**
  * src/lib/useKeyboardShortcuts.ts — Central keyboard shortcut registry.
- * ⌘K/`/` open CommandBar; ⌘1..⌘6 switch workspaces; R refresh; T theme cycle;
- * ? shortcuts dialog; Esc closes overlay/returns from dossier.
+ * ⌘K/`/` open CommandBar; ⌘1..⌘7 switch workspaces (the range derives from the
+ * WORKSAPCES registry length passed in — appending `segments` enabled ⌘7 with
+ * zero renumbering); R refresh; T theme cycle; ? shortcuts dialog; Esc closes
+ * overlay/returns from dossier.
  * Ignored when focus is in an input (except ⌘K).
  * Listens on `window`.
  */

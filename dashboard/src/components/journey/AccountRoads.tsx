@@ -1,8 +1,9 @@
 /**
- * Account roads — three mini trend lines (zerodha INR, moomoo SGD,
- * real_estate) from history.byPlatform, the ledger's per-platform base-INR
- * series. Each road lazy-mounts its ECharts instance via useInView (motion
- * spec §9 — nothing animates off-screen).
+ * Account roads — mini trend lines (zerodha INR, moomoo SGD)
+ * from history.byPlatform, the ledger's per-platform base-INR
+ * series. Each road lazy-mounts via useInView (motion spec §9 — nothing
+ * animates off-screen). shadcn/Recharts version — gradient areas, hidden axes,
+ * custom tooltip, CSS entrance animations.
  *
  * Honesty: these are PLATFORM trends, not per-holding history — the contract
  * has no per-ticker series (rationale §3). Leading/trailing zero days (the
@@ -11,16 +12,23 @@
  */
 
 import { useMemo } from 'react'
-import type { EChartsOption } from 'echarts'
+import {
+  AreaChart,
+  Area,
+  XAxis,
+  YAxis,
+  Tooltip,
+  ResponsiveContainer,
+} from 'recharts'
 
-import { EChart } from '@/components/charts/EChart'
-import { getChartPalette } from '@/components/charts/options'
 import { useInView } from './useInView'
 import { formatInrCompact, MASK_TEXT } from '@/lib/format'
 import { usePrivacy } from '@/lib/privacy'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
+import { ChartContainer, type ChartConfig } from '@/components/ui/chart'
+import { ChartTooltipContent } from '@/components/ui/chart-tooltip'
 import type { History } from '@/types/contract'
 
 type RoadDef = { platform: string; label: string; currency: string }
@@ -28,8 +36,13 @@ type RoadDef = { platform: string; label: string; currency: string }
 const ROADS: ReadonlyArray<RoadDef> = [
   { platform: 'zerodha', label: 'Zerodha', currency: 'INR' },
   { platform: 'moomoo', label: 'Moomoo', currency: 'SGD' },
-  { platform: 'real_estate', label: 'Real estate', currency: 'INR' },
 ]
+
+/** ChartConfig mapping platform keys to --chart-* CSS variables. */
+const ROAD_CHART_CONFIG: ChartConfig = {
+  zerodha: { label: 'Zerodha', color: 'var(--chart-1)' },
+  moomoo: { label: 'Moomoo', color: 'var(--chart-2)' },
+}
 
 /** Trim leading + trailing non-running (zero) days from one platform series. */
 function roadSeries(
@@ -47,70 +60,63 @@ function roadSeries(
   }
 }
 
-/** Sparse mini-line: no axes, no legend, just the curve + a per-road tooltip. */
-function miniLineOption(opts: {
-  dates: string[]
-  values: number[]
-  color: string
-  masked: boolean
-}): EChartsOption {
-  return {
-    backgroundColor: 'transparent',
-    animation: false,
-    grid: { left: 0, right: 0, top: 2, bottom: 0 },
-    xAxis: {
-      type: 'category',
-      show: false,
-      boundaryGap: false,
-      data: opts.dates.map((d) => d.slice(5)),
-    },
-    yAxis: { type: 'value', show: false, min: 'dataMin' },
-    tooltip: {
-      trigger: 'axis',
-      backgroundColor: 'rgba(20,20,24,0.92)',
-      borderColor: 'rgba(255,255,255,0.1)',
-      textStyle: { color: '#e8e8ea' },
-      formatter: (params: unknown) => {
-        const rows = params as Array<{ axisValue?: string; value?: number }>
-        const row = rows[0]
-        const value = typeof row?.value === 'number' ? row.value : 0
-        const display = opts.masked ? MASK_TEXT : formatInrCompact(value)
-        return `${row?.axisValue ?? ''}<br/><b>${display}</b>`
-      },
-    },
-    series: [
-      {
-        name: opts.dates[0] ?? '',
-        type: 'line',
-        data: opts.values,
-        smooth: 0.3,
-        showSymbol: opts.values.length <= 8,
-        symbolSize: 4,
-        lineStyle: { width: 2, color: opts.color },
-        itemStyle: { color: opts.color },
-        areaStyle: { opacity: 0.12 },
-      },
-    ],
-  }
+/** Gradient defs for the roads — injected into each chart's <defs>. */
+function RoadGradientDefs({ platform }: { platform: string }) {
+  const color = ROAD_CHART_CONFIG[platform]?.color ?? 'var(--chart-1)'
+  const gradientId = `road${platform}Gradient`
+  return (
+    <defs>
+      <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+        <stop offset="5%" stopColor={color} stopOpacity={0.12} />
+        <stop offset="95%" stopColor={color} stopOpacity={0} />
+      </linearGradient>
+    </defs>
+  )
 }
 
+/** Custom tooltip formatter — mirrors the ECharts miniLineOption formatter. */
+function roadTooltipFormatter(
+  value: number | string | undefined,
+  _name: string,
+  _props: unknown,
+  masked: boolean,
+) {
+  const num = typeof value === 'number' ? value : 0
+  return masked ? MASK_TEXT : formatInrCompact(num)
+}
+
+/** Single road sparkline — AreaChart with gradient fill, hidden axes, custom tooltip. */
 function RoadCard({
   def,
   history,
-  palette,
+  index,
 }: {
   def: RoadDef
   history: History
-  palette: string[]
+  index: number
 }) {
   const { ref, inView } = useInView<HTMLDivElement>()
   const { masked } = usePrivacy()
 
   const series = useMemo(() => roadSeries(history, def.platform), [history, def.platform])
-  const colorIdx = ROADS.findIndex((r) => r.platform === def.platform)
-  const color = palette[colorIdx % palette.length] ?? palette[0] ?? '#6f7cff'
-  const current =
-    series.values.length > 0 ? (series.values[series.values.length - 1] ?? 0) : null
+  const current = series.values.length > 0 ? (series.values[series.values.length - 1] ?? 0) : 0
+  const hasValue = series.values.length > 0
+
+  // Transform to Recharts data shape: [{ date: 'MM-DD', value: number }, ...]
+  const data = useMemo(
+    () =>
+      series.dates.map((d, i) => ({
+        date: d.slice(5), // 'YYYY-MM-DD' -> 'MM-DD'
+        value: (series.values[i] as number) ?? 0,
+      })),
+    [series.dates, series.values],
+  )
+
+  const color = ROAD_CHART_CONFIG[def.platform]?.color ?? 'var(--chart-1)'
+  const gradientId = `road${def.platform}Gradient`
+
+  // Staggered animation delay: 100ms per road via CSS variable
+  const staggerDelay = `${index * 100}ms`
 
   return (
     <div ref={ref} className="rounded-md border border-border p-2.5">
@@ -121,22 +127,79 @@ function RoadCard({
         </Badge>
       </div>
       <p className="mt-1 text-sm font-semibold tabular-nums">
-        {masked ? MASK_TEXT : current === null ? '—' : formatInrCompact(current)}
+        {masked ? MASK_TEXT : hasValue ? formatInrCompact(current) : "—"}
       </p>
       <div className="mt-1 h-10 w-full">
         {inView ? (
           series.values.length === 0 ? (
             <p className="pt-2.5 text-center text-[10px] text-muted-foreground">no data yet</p>
           ) : (
-            <EChart
-              option={miniLineOption({
-                dates: series.dates,
-                values: series.values,
-                color,
-                masked,
-              })}
-              height={40}
-            />
+            <ChartContainer config={ROAD_CHART_CONFIG} className="h-10 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={data} margin={{ top: 2, right: 0, bottom: 0, left: 0 }}>
+                  <RoadGradientDefs platform={def.platform} />
+                  <defs>
+                    <style
+                      dangerouslySetInnerHTML={{
+                        __html: `
+                          @keyframes area-fade {
+                            from { opacity: 0; }
+                            to { opacity: 1; }
+                          }
+                          @keyframes line-draw {
+                            from { stroke-dashoffset: var(--path-length); }
+                            to { stroke-dashoffset: 0; }
+                          }
+                          @media (prefers-reduced-motion: reduce) {
+                            .road-area,
+                            .road-line {
+                              animation-duration: 0.01ms !important;
+                            }
+                          }
+                        `,
+                      }}
+                    />
+                  </defs>
+                  <XAxis
+                    dataKey="date"
+                    type="category"
+                    axisLine={false}
+                    tickLine={false}
+                    tick={false}
+                    tickMargin={0}
+                    interval={0}
+                  />
+                  <YAxis
+                    type="number"
+                    axisLine={false}
+                    tickLine={false}
+                    tick={false}
+                    domain={[0, 'auto']}
+                  />
+                  <Tooltip
+                    content={
+                      <ChartTooltipContent
+                        formatter={(value, name, props) => roadTooltipFormatter(value, name, props, masked)}
+                        nameKey="date"
+                        labelKey="value"
+                      />
+                    }
+                    cursor={false}
+                  />
+                  <Area
+                    className="road-area"
+                    type="monotone"
+                    dataKey="value"
+                    stroke={color}
+                    strokeWidth={2}
+                    fill={`url(#${gradientId})`}
+                    style={{
+                      animation: `area-fade 600ms var(--ease-out) ${staggerDelay} forwards`,
+                    } as React.CSSProperties}
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            </ChartContainer>
           )
         ) : (
           <Skeleton className="h-10 w-full" />
@@ -147,7 +210,6 @@ function RoadCard({
 }
 
 export function AccountRoads({ history }: { history: History }) {
-  const palette = useMemo(() => getChartPalette(), [])
   return (
     <Card>
       <CardContent className="p-4">
@@ -156,8 +218,8 @@ export function AccountRoads({ history }: { history: History }) {
           Platform trend in base INR — not per-holding
         </p>
         <div className="mt-3 space-y-2.5">
-          {ROADS.map((def) => (
-            <RoadCard key={def.platform} def={def} history={history} palette={palette} />
+          {ROADS.map((def, index) => (
+            <RoadCard key={def.platform} def={def} history={history} index={index} />
           ))}
         </div>
       </CardContent>

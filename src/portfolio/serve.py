@@ -165,7 +165,7 @@ def run(host: str = "127.0.0.1", port: int = DEFAULT_PORT) -> None:
 
 
 def _daemon_healthy(host: str, port: int) -> bool:
-    """True when a portfolio serve daemon is already answering /health with ok.
+    """True when a portfolio serve daemon is already answering /health with ok AND auth.
 
     Read-only probe (loopback GET, 2s timeout). Any failure - connection
     refused, non-JSON, unhealthy response - means "no usable daemon" and the
@@ -174,6 +174,7 @@ def _daemon_healthy(host: str, port: int) -> bool:
     """
     try:
         resp = httpx.get(f"http://{host}:{port}/health", timeout=2.0)
-        return resp.status_code == 200 and bool(resp.json().get("ok"))
+        data = resp.json()
+        return resp.status_code == 200 and data.get("ok") and data.get("auth")
     except Exception:  # noqa: BLE001 - any failure means "no daemon": proceed
         return False

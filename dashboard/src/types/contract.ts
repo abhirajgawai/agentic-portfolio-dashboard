@@ -9,6 +9,7 @@
  *   alerts.json      fired alert rules (M6)
  *   xirr.json        per-account XIRR (M5)
  *   performance.json daily performance tracker (M8.6)
+ *   goals.json       savings goals from SQLite (M8.9)
  *
  * The same schemas are used in two places:
  *   1. at build/dev time by `npm run check:contract` (scripts/check-contract.ts)
@@ -233,6 +234,30 @@ export const PerformanceSchema = z.object({
 })
 
 /* ------------------------------------------------------------------ */
+/* goals.json (M8.9 — savings goals in the DB)                         */
+/* ------------------------------------------------------------------ */
+
+/** One savings goal. `id` is the STABLE SQLite id (the UI's crossing-ack key);
+ *  `crossedAt` is stamped by the pipeline when valueBase first passed
+ *  targetAmount (null until then). Progress itself is NEVER stored — the UI
+ *  derives it from valueBase/targetAmount at render time. */
+export const GoalSchema = z.object({
+  id: z.number(),
+  label: z.string(),
+  targetAmount: z.number().positive(),
+  color: z.string(),
+  crossedAt: z.string().nullable(),
+})
+
+export const GoalsSchema = z.object({
+  asOf: z.string(),
+  /** Portfolio value (base currency) at export time — lets standalone
+   *  consumers compute progress without latest.json. */
+  valueBase: z.number(),
+  goals: z.array(GoalSchema),
+})
+
+/* ------------------------------------------------------------------ */
 /* Inferred types                                                      */
 /* ------------------------------------------------------------------ */
 
@@ -253,3 +278,5 @@ export type Performance = z.infer<typeof PerformanceSchema>
 export type PerformanceDaily = z.infer<typeof PerformanceDailySchema>
 export type PerformanceMover = z.infer<typeof PerformanceMoverSchema>
 export type PerformanceReval = z.infer<typeof PerformanceRevalSchema>
+export type Goal = z.infer<typeof GoalSchema>
+export type Goals = z.infer<typeof GoalsSchema>

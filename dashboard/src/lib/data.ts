@@ -12,7 +12,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { z } from 'zod'
 
-import { AlertsSchema, HistorySchema, LatestSchema, PerformanceSchema, XirrSchema, PropertyImportRequestSchema, PropertyImportResponseSchema } from '@/types/contract'
+import { AlertsSchema, GoalsSchema, HistorySchema, LatestSchema, PerformanceSchema, XirrSchema, PropertyImportRequestSchema, PropertyImportResponseSchema } from '@/types/contract'
 
 /** Base URL for the contract files. Empty = same origin (`/data/*.json`). */
 const DATA_ROOT = (import.meta.env.VITE_DATA_BASE_URL as string | undefined) ?? ''
@@ -57,6 +57,7 @@ export const loadHistory = () => loadJson('history.json', dataUrl('history.json'
 export const loadAlerts = () => loadJson('alerts.json', dataUrl('alerts.json'), AlertsSchema)
 export const loadXirr = () => loadJson('xirr.json', dataUrl('xirr.json'), XirrSchema)
 export const loadPerformance = () => loadJson('performance.json', dataUrl('performance.json'), PerformanceSchema)
+export const loadGoals = () => loadJson('goals.json', dataUrl('goals.json'), GoalsSchema)
 
 /* ------------------------------------------------------------------ */
 /* TanStack Query hooks — server state for the five contract files     */
@@ -86,6 +87,10 @@ export function useXirr() {
 
 export function usePerformance() {
   return useQuery({ queryKey: ['performance'], queryFn: loadPerformance, ...QUERY_OPTIONS })
+}
+
+export function useGoalsData() {
+  return useQuery({ queryKey: ['goals'], queryFn: loadGoals, ...QUERY_OPTIONS })
 }
 
 /* ------------------------------------------------------------------ */

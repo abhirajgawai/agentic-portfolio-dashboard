@@ -197,6 +197,26 @@
 }
 
 /* ================================================================== */
+/* CHAT DRAWER ENTRANCE — slide in from the right, GPU-only            */
+/* (transform only, 200ms, token ease-out). Reduced motion is handled  */
+/* by the global prefers-reduced-motion block below (forces a 0.01ms   */
+/* duration = instant, no exit animation on close — plain unmount).    */
+/* ================================================================== */
+
+@theme {
+  --animate-chat-in: chat-in 200ms var(--ease-out);
+
+  @keyframes chat-in {
+    from {
+      transform: translateX(100%);
+    }
+    to {
+      transform: translateX(0);
+    }
+  }
+}
+
+/* ================================================================== */
 /* BASE LAYER — body styles, focus ring, scrollbar.                    */
 /* ================================================================== */
 

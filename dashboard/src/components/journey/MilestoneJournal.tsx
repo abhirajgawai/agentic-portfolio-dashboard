@@ -30,14 +30,16 @@ import { deriveJournalEntries, formatShortDate, type JournalEntry } from './jour
 /* ------------------------------------------------------------------ */
 
 const STORAGE_KEY = 'dash-journal'
+const JOURNAL_VERSION = 2 // increment when derivation logic changes to force reseed
 
-type StoredJournal = { seededAt: string; entries: JournalEntry[] }
+type StoredJournal = { version: number; seededAt: string; entries: JournalEntry[] }
 
 function loadStored(): JournalEntry[] | null {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY)
     if (!raw) return null
     const parsed = JSON.parse(raw) as StoredJournal
+    if (parsed.version !== JOURNAL_VERSION) return null // derivation changed → full reseed
     if (!Array.isArray(parsed.entries)) return null
     const out: JournalEntry[] = []
     for (const e of parsed.entries as unknown[]) {
@@ -59,7 +61,7 @@ function loadStored(): JournalEntry[] | null {
 
 function persistJournal(entries: JournalEntry[]): void {
   try {
-    const payload: StoredJournal = { seededAt: new Date().toISOString(), entries }
+    const payload: StoredJournal = { version: JOURNAL_VERSION, seededAt: new Date().toISOString(), entries }
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload))
   } catch {
     // Private mode / unavailable storage — the in-memory list still works.

@@ -40,6 +40,10 @@ export interface FilterContextValue {
   activeFilters: ActiveFilters
   /** Toggle one value in a dimension. If it exists, remove it; otherwise add it. */
   toggleFilter: (dim: FilterDimension, value: string) => void
+  /** REPLACE the entire filter state — the Segments card-click semantics
+   *  (spec-round2/segments-workspace §4.2: click US → geography={US}, every
+   *  other dimension cleared). The caller builds the full ActiveFilters. */
+  replaceFilters: (next: ActiveFilters) => void
   /** Clear all active filters. */
   clearFilters: () => void
   /** Holdings filtered by the current activeFilters. Does NOT apply search. */
@@ -101,6 +105,16 @@ export function FilterProvider({
     })
   }, [])
 
+  const replaceFilters = useCallback((next: ActiveFilters) => {
+    // Copy the Sets so the caller's objects can never alias provider state.
+    setActiveFilters({
+      geography: new Set(next.geography),
+      platform: new Set(next.platform),
+      sector: new Set(next.sector),
+      assetClass: new Set(next.assetClass),
+    })
+  }, [])
+
   const filteredHoldings = useMemo(() => {
     if (!holdings) return []
     return holdings.filter((h) => {
@@ -137,11 +151,12 @@ export function FilterProvider({
     () => ({
       activeFilters,
       toggleFilter,
+      replaceFilters,
       clearFilters,
       filteredHoldings,
       hasActiveFilters,
     }),
-    [activeFilters, toggleFilter, clearFilters, filteredHoldings, hasActiveFilters],
+    [activeFilters, toggleFilter, replaceFilters, clearFilters, filteredHoldings, hasActiveFilters],
   )
 
   return <FilterContext.Provider value={value}>{children}</FilterContext.Provider>

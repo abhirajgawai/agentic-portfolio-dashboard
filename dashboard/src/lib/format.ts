@@ -124,7 +124,7 @@ export function formatLocalTime(iso: string | null | undefined): string {
   })
 }
 
-/** Long form for headers: "14 Aug 2026, 6:30 pm". */
+/** Long form for headers (IST): "14 Aug 2026, 6:30 pm". */
 export function formatAsOfLong(iso: string | null | undefined): string {
   if (!iso) return '—'
   const d = new Date(iso)
@@ -136,6 +136,21 @@ export function formatAsOfLong(iso: string | null | undefined): string {
     hour: '2-digit',
     minute: '2-digit',
     timeZone: 'Asia/Kolkata',
+  })
+}
+
+/** Long form for headers (SGT): "14 Aug 2026, 8:30 pm". */
+export function formatAsOfLongSGT(iso: string | null | undefined): string {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return '—'
+  return d.toLocaleString('en-IN', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZone: 'Asia/Singapore',
   })
 }
 

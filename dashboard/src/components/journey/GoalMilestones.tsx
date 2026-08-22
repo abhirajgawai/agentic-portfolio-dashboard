@@ -1,14 +1,19 @@
 /**
- * Goal milestones — dashboard-local savings goals (localStorage via ./goals,
- * NOT ledger facts — rationale §3). Each row shows the label,
- * target, progress vs the current portfolio value and "% there". Crossing a
- * goal fires ONE sonner toast, acked in localStorage (`dash-goal-acked:<id>`)
- * so it never re-fires; the crossed card stays highlighted. Add/edit via a
- * shadcn dialog with a chart-palette color pick.
+ * Goal milestones — savings goals backed by the portfolio SQLite DB (M8.9):
+ * reads goals.json (the 6th contract file) via useGoalsData(), and creates /
+ * updates / deletes through the bridge (`POST|PATCH|DELETE /api/goals`),
+ * invalidating the ['goals'] query after each mutation and reloading the page
+ * once the bridge has regenerated the export. Progress is NEVER
+ * stored — each row derives it from the valueBase prop (min(value/target,1)).
+ * Crossing a goal fires ONE sonner toast, acked in localStorage
+ * (`dash-goal-acked:<dbId>`) so it never re-fires; the crossed card stays
+ * highlighted. Edit is a REAL partial PATCH (the old remove+re-add hack is
+ * gone); add/edit via a shadcn dialog with a chart-palette color pick.
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Pencil, Plus, Trash2 } from 'lucide-react'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { Loader2, Pencil, Plus, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { Badge } from '@/components/ui/badge'
@@ -25,19 +30,35 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Progress } from '@/components/ui/progress'
+import { Skeleton } from '@/components/ui/skeleton'
 import { getChartPalette } from '@/components/charts/options'
-import { progress, useGoals, type Goal } from './goals'
+import { createGoal, deleteGoal, updateGoal, getHealth } from '@/lib/api'
+import { useGoalsData } from '@/lib/data'
+import type { GoalUpdateInput } from '@/types/bridge'
+import type { Goal } from '@/types/contract'
 import { formatInrCompact, MASK_TEXT } from '@/lib/format'
 import { usePrivacy } from '@/lib/privacy'
+import { useBackendHealth } from '@/lib/useBackendHealth'
 import { cn } from '@/lib/utils'
 
 /* ------------------------------------------------------------------ */
-/* Crossing ack — one toast per goal, forever (localStorage)           */
+/* Progress math — derived at render time, never stored                */
+/* ------------------------------------------------------------------ */
+
+/** Fraction of the target reached, clamped to [0, 1]. */
+function progress(goal: Goal, valueBase: number): number {
+  if (!Number.isFinite(goal.targetAmount) || goal.targetAmount <= 0) return 0
+  return Math.min(valueBase / goal.targetAmount, 1)
+}
+
+/* ------------------------------------------------------------------ */
+/* Crossing ack — one toast per goal, forever (localStorage, keyed     */
+/* on the STABLE numeric DB id)                                        */
 /* ------------------------------------------------------------------ */
 
 const ACK_PREFIX = 'dash-goal-acked:'
 
-function readAck(id: string): boolean {
+function readAck(id: number): boolean {
   try {
     return window.localStorage.getItem(ACK_PREFIX + id) === 'true'
   } catch {
@@ -45,7 +66,7 @@ function readAck(id: string): boolean {
   }
 }
 
-function writeAck(id: string): void {
+function writeAck(id: number): void {
   try {
     window.localStorage.setItem(ACK_PREFIX + id, 'true')
   } catch {
@@ -75,17 +96,19 @@ function useGoalCrossing(goals: Goal[], valueBase: number): void {
 /* Add/edit dialog                                                     */
 /* ------------------------------------------------------------------ */
 
-type GoalDraft = Omit<Goal, 'id'>
+type GoalDraft = Omit<Goal, 'id' | 'crossedAt'>
 
 function GoalDialog({
   open,
   onOpenChange,
   editing,
+  pending,
   onSave,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   editing: Goal | null
+  pending: boolean
   onSave: (draft: GoalDraft) => void
 }) {
   const palette = useMemo(() => getChartPalette(), [])
@@ -116,8 +139,8 @@ function GoalDialog({
         <DialogHeader>
           <DialogTitle>{editing ? 'Edit goal' : 'Add a goal'}</DialogTitle>
           <DialogDescription>
-            Goals live only in this browser (rationale §3) — they are dashboard
-            affordances, not ledger facts.
+            Goals are saved to your portfolio database via the local bridge —
+            they persist across browsers and dashboard reinstalls.
           </DialogDescription>
         </DialogHeader>
         <form
@@ -169,10 +192,11 @@ function GoalDialog({
             </div>
           </div>
           <DialogFooter>
-            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
+            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={pending}>
               Cancel
             </Button>
-            <Button type="submit" disabled={!valid}>
+            <Button type="submit" disabled={!valid || pending}>
+              {pending && <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />}
               {editing ? 'Save' : 'Add goal'}
             </Button>
           </DialogFooter>
@@ -187,10 +211,78 @@ function GoalDialog({
 /* ------------------------------------------------------------------ */
 
 export function GoalMilestones({ valueBase }: { valueBase: number }) {
-  const { goals, add, remove } = useGoals()
+  const queryClient = useQueryClient()
+  const goalsQuery = useGoalsData()
   const { masked } = usePrivacy()
+  const health = useBackendHealth()
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<Goal | null>(null)
+
+  const goals = goalsQuery.data?.goals ?? []
+
+  // Every mutation re-reads goals.json on success (the bridge regenerates it).
+  const invalidateGoals = () => {
+    void queryClient.invalidateQueries({ queryKey: ['goals'] })
+  }
+
+  // Wait for the bridge to finish regenerating exports, then reload.
+  // Captures the current export stamp, then polls getHealth() until it advances.
+  const reloadAfterMutation = async () => {
+    const baseline = health.exportsGeneratedAt
+    if (!baseline) {
+      // No baseline — just reload (fallback)
+      window.location.reload()
+      return
+    }
+    // Poll for the export stamp to advance (new export written)
+    const maxAttempts = 30 // ~30 seconds max
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      await new Promise((r) => setTimeout(r, 1000))
+      try {
+        const h = await getHealth()
+        if (h.pipeline.exportsGeneratedAt && h.pipeline.exportsGeneratedAt !== baseline) {
+          window.location.reload()
+          return
+        }
+      } catch {
+        // Ignore fetch errors, keep polling
+      }
+    }
+    // Timeout — reload anyway
+    window.location.reload()
+  }
+
+  const createMutation = useMutation({
+    mutationFn: createGoal,
+    onSuccess: async () => {
+      invalidateGoals()
+      setDialogOpen(false)
+      await reloadAfterMutation()
+    },
+    onError: (err: Error) => toast.error(`Could not add goal — ${err.message}`),
+  })
+
+  const updateMutation = useMutation({
+    mutationFn: (input: { id: number; patch: GoalUpdateInput }) => updateGoal(input.id, input.patch),
+    onSuccess: async () => {
+      invalidateGoals()
+      setDialogOpen(false)
+      await reloadAfterMutation()
+    },
+    onError: (err: Error) => toast.error(`Could not save goal — ${err.message}`),
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: deleteGoal,
+    onSuccess: async () => {
+      invalidateGoals()
+      await reloadAfterMutation()
+    },
+    onError: (err: Error) => toast.error(`Could not delete goal — ${err.message}`),
+  })
+
+  const dialogPending = createMutation.isPending || updateMutation.isPending
+  const rowsPending = dialogPending || deleteMutation.isPending
 
   useGoalCrossing(goals, valueBase)
 
@@ -204,10 +296,17 @@ export function GoalMilestones({ valueBase }: { valueBase: number }) {
     setDialogOpen(true)
   }
 
+  // Edit is a REAL partial PATCH against the stable DB id — no remove+re-add,
+  // so the id (and its crossing ack) survives every edit.
   const handleSave = (draft: GoalDraft) => {
-    if (editing) remove(editing.id) // the goals lib has no update — remove + re-add
-    add(draft)
-    setDialogOpen(false)
+    if (editing) {
+      updateMutation.mutate({
+        id: editing.id,
+        patch: { label: draft.label, targetAmount: draft.targetAmount, color: draft.color },
+      })
+    } else {
+      createMutation.mutate(draft)
+    }
   }
 
   return (
@@ -216,7 +315,7 @@ export function GoalMilestones({ valueBase }: { valueBase: number }) {
         <div className="flex items-center justify-between gap-2">
           <div>
             <h3 className="text-sm font-semibold">Goals</h3>
-            <p className="text-[11px] text-muted-foreground">local to this dashboard</p>
+            <p className="text-[11px] text-muted-foreground">saved to your portfolio database</p>
           </div>
           <Button
             variant="outline"
@@ -229,7 +328,16 @@ export function GoalMilestones({ valueBase }: { valueBase: number }) {
           </Button>
         </div>
 
-        {goals.length === 0 ? (
+        {goalsQuery.isLoading ? (
+          <div className="mt-3 space-y-2.5" aria-busy="true" aria-label="Loading goals">
+            <Skeleton className="h-14 w-full" />
+            <Skeleton className="h-14 w-full" />
+          </div>
+        ) : goalsQuery.isError ? (
+          <p className="mt-4 rounded-md border border-dashed border-destructive/40 p-3 text-center text-[11px] text-muted-foreground">
+            Goals unavailable — run the pipeline export or check the bridge
+          </p>
+        ) : goals.length === 0 ? (
           <p className="mt-4 rounded-md border border-dashed border-border p-3 text-center text-[11px] text-muted-foreground">
             No goals yet — set a target to watch
           </p>
@@ -266,6 +374,7 @@ export function GoalMilestones({ valueBase }: { valueBase: number }) {
                         size="icon"
                         className="size-6"
                         onClick={() => openEdit(goal)}
+                        disabled={rowsPending}
                         aria-label={`Edit ${goal.label}`}
                       >
                         <Pencil className="size-3" />
@@ -274,10 +383,15 @@ export function GoalMilestones({ valueBase }: { valueBase: number }) {
                         variant="ghost"
                         size="icon"
                         className="size-6"
-                        onClick={() => remove(goal.id)}
+                        onClick={() => deleteMutation.mutate(goal.id)}
+                        disabled={rowsPending}
                         aria-label={`Delete ${goal.label}`}
                       >
-                        <Trash2 className="size-3" />
+                        {deleteMutation.isPending ? (
+                          <Loader2 className="size-3 animate-spin" aria-hidden="true" />
+                        ) : (
+                          <Trash2 className="size-3" />
+                        )}
                       </Button>
                     </span>
                   </div>
@@ -304,6 +418,7 @@ export function GoalMilestones({ valueBase }: { valueBase: number }) {
         open={dialogOpen}
         onOpenChange={setDialogOpen}
         editing={editing}
+        pending={dialogPending}
         onSave={handleSave}
       />
     </Card>

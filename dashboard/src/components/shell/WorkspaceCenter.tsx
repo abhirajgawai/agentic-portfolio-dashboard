@@ -1,7 +1,7 @@
 /**
- * src/components/shell/WorkspaceCenter.tsx — Full-width workspace hosting the
- * active view. The workspace tabs live in the unified Header; this component
- * only renders breadcrumb + active content.
+ * src/components/shell/WorkspaceCenter.tsx — Full-width workspace rendering
+ * the active view content. Header (parent) owns the workspace tabs.
+ * Receives `workspace` + `setTransientDossier` from AppShell.
  */
 
 import { useState } from 'react'
@@ -10,12 +10,11 @@ import { usePrivacy } from '@/lib/privacy'
 import { type WorkspaceId, type TransientDossier } from '@/lib/workspaces'
 
 import { JourneyWorkspace } from '@/components/workspaces/JourneyWorkspace'
-import { IndiaView } from '@/components/holdings/IndiaView'
-import { USView } from '@/components/holdings/USView'
+import { AllocationScreen } from '@/components/overview/AllocationScreen'
+import { PortfolioScreen } from '@/components/portfolio/PortfolioScreen'
 import { ReturnsScreen } from '@/components/returns/ReturnsScreen'
 import { AlertsScreen } from '@/components/alerts/AlertsScreen'
 import { PropertiesScreen } from '@/components/holdings/PropertiesScreen'
-import { CasImportScreen } from '@/components/cas/CasImportScreen'
 
 interface WorkspaceCenterProps {
   workspace: WorkspaceId
@@ -32,7 +31,6 @@ export function WorkspaceCenter({ workspace, setTransientDossier }: WorkspaceCen
   const handleDossierSelect = (ticker: string) => {
     const prev = workspace
     setBreadcrumb(`${prev} / ${ticker}`)
-    // Tell the hook to track this dossier for potential "back" navigation
     setTransientDossier({ ticker, previousWorkspace: prev })
   }
 
@@ -44,7 +42,6 @@ export function WorkspaceCenter({ workspace, setTransientDossier }: WorkspaceCen
           <button
             onClick={() => {
               setBreadcrumb(null)
-              // Close the transient dossier
               setTransientDossier({ ticker: null })
             }}
             className="cursor-pointer text-xs font-medium underline underline-offset-2 hover:text-foreground"
@@ -60,12 +57,11 @@ export function WorkspaceCenter({ workspace, setTransientDossier }: WorkspaceCen
         {workspace === 'journey' && (
           <JourneyWorkspace latest={latest.data} masked={masked} onDossierSelect={handleDossierSelect} />
         )}
-        {workspace === 'india' && <IndiaView />}
-        {workspace === 'us' && <USView />}
+        {workspace === 'allocation' && <AllocationScreen />}
+        {workspace === 'portfolio' && <PortfolioScreen setTransientDossier={setTransientDossier} />}
         {workspace === 'returns' && <ReturnsScreen />}
         {workspace === 'alerts' && <AlertsScreen />}
         {workspace === 'properties' && <PropertiesScreen />}
-        {workspace === 'cas' && <CasImportScreen />}
       </div>
     </div>
   )

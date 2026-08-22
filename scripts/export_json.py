@@ -1,7 +1,7 @@
 """Export the latest snapshot to the M8 dashboard JSON contract.
 
 Produces dashboard/public/data/latest.json + history.json (+ xirr.json,
-alerts.json, performance.json) from the SQLite DB.
+alerts.json, performance.json, goals.json) from the SQLite DB.
 Every run ends with this (the plan's deterministic dashboard path - the UI
 never touches a broker or the LLM).
 
@@ -42,6 +42,7 @@ OUT_HISTORY = ROOT_DIR / "dashboard" / "public" / "data" / "history.json"
 OUT_XIRR = ROOT_DIR / "dashboard" / "public" / "data" / "xirr.json"
 OUT_ALERTS = ROOT_DIR / "dashboard" / "public" / "data" / "alerts.json"
 OUT_PERF = ROOT_DIR / "dashboard" / "public" / "data" / "performance.json"
+OUT_GOALS = ROOT_DIR / "dashboard" / "public" / "data" / "goals.json"
 
 # Staleness thresholds (days) per platform: brokers refresh daily, CAS platforms
 # refresh on the monthly import cadence (M-4). Positions older than this mark the
@@ -88,6 +89,40 @@ def _is_stale(as_of: str | None, max_age_days: int, now: datetime) -> bool:
     except ValueError:
         return True  # unparseable timestamp -> treat as stale, never claim fresh
     return age.days > max_age_days
+
+
+def _utcnow() -> datetime:
+    """Clock seam for the crossing stamp (same habit as goals._now_iso):
+    tests pin this instead of sleeping across a wall-clock second."""
+    return datetime.now(UTC)
+
+
+def _stamp_goal_crossings(db_path: Path, value_base: float) -> int:
+    """Stamp crossed_at ONCE for goals whose target <= value_base (M8.9).
+
+    The export run is the observer goals.py defers to ("crossed_at is outside
+    this module's writes") - the pipeline is what sees the portfolio total next
+    to the targets. Idempotent by predicate: only rows with crossed_at IS NULL
+    are matched, so a second export with the same (or larger) value_base is a
+    no-op; goals still below target are never touched and keep NULL.
+
+    Uses its own short-lived rw connection instead of the export's long-lived
+    one: open/update/commit/close sits entirely inside the caller's tolerant
+    block, so a stamping failure cannot leave the shared connection mid-
+    transaction (WAL makes the brief second connection safe).
+    """
+    stamp = _utcnow().replace(microsecond=0).isoformat()  # goal-table convention
+    conn = connect(db_path)
+    try:
+        cur = conn.execute(
+            "UPDATE goal SET crossed_at = ?, updated_at = ?"
+            " WHERE crossed_at IS NULL AND target_amount <= ?",
+            (stamp, stamp, value_base),
+        )
+        conn.commit()
+        return cur.rowcount
+    finally:
+        conn.close()
 
 
 def export(db_path: Path = DB_PATH, out: Path = OUT) -> Path:
@@ -207,13 +242,18 @@ def export(db_path: Path = DB_PATH, out: Path = OUT) -> Path:
                 "stale": _is_stale(r["as_of"], PLATFORM_STALE_DAYS.get(name, DEFAULT_STALE_DAYS), now),
             }
 
+        # M8.9: one rounded total shared by latest.json's totals.valueBase AND
+        # goals.json's valueBase - identical by construction (same variable),
+        # never recomputed on a divergent path.
+        totals_value_base = round(totals_base, 2)
+
         payload = {
             "asOf": as_of,
             "baseCurrency": base,
             "fx": {"USDINR": usd_inr, "SGDINR": sgd_inr, "USD_SGD": usd_to_sgd},
             "platforms": platforms,
             "totals": {
-                "valueBase": round(totals_base, 2),
+                "valueBase": totals_value_base,
                 "byAccountCurrency": {k: round(v, 2) for k, v in by_account_currency.items()},
                 "dayPnl": round(day_pnl_base, 2),
                 "dayPnlByAccountCurrency": {k: round(v, 2) for k, v in day_pnl_by_currency.items()},
@@ -298,6 +338,43 @@ def export(db_path: Path = DB_PATH, out: Path = OUT) -> Path:
         logger.info(
             "daily performance: %d days, %d scope rows rebuilt", len(perf_payload["daily"]), rebuilt
         )
+
+        # M8.9: goals.json - savings-goal targets + the crossing stamp.
+        # OPTIONAL like alerts: a goals failure must never lose the five files
+        # already on disk above. Order matters: stamp FIRST, then read, so the
+        # very export that crosses a goal already carries its crossedAt. asOf
+        # follows the xirr/performance sibling convention (this export's
+        # instant); valueBase is the SAME rounded total latest.json carries.
+        # Empty goal table still writes the file ("goals": []) - the dashboard
+        # and check-contract depend on its existence.
+        try:
+            from portfolio.goals import list_goals  # noqa: PLC0415
+
+            stamped = _stamp_goal_crossings(db_path, totals_value_base)
+            goals_payload = {
+                "asOf": now.isoformat(),
+                "valueBase": totals_value_base,
+                "goals": [
+                    {
+                        "id": g["id"],
+                        "label": g["label"],
+                        "targetAmount": g["target_amount"],
+                        "color": g["color"],
+                        "crossedAt": g["crossed_at"],
+                    }
+                    for g in list_goals(db_path=db_path)
+                ],
+            }
+            OUT_GOALS.parent.mkdir(parents=True, exist_ok=True)
+            OUT_GOALS.write_text(json.dumps(goals_payload, indent=2), encoding="utf-8")
+            logger.info(
+                "goals: %d exported, %d newly crossed (valueBase=%.2f)",
+                len(goals_payload["goals"]),
+                stamped,
+                totals_value_base,
+            )
+        except Exception as exc:  # noqa: BLE001 - goals optional
+            logger.warning("goals export failed (export continues): %s", exc)
         return out
     finally:
         conn.close()
@@ -310,3 +387,4 @@ if __name__ == "__main__":
     print(f"exported -> {OUT_XIRR}")
     print(f"exported -> {OUT_ALERTS}")
     print(f"exported -> {OUT_PERF}")
+    print(f"exported -> {OUT_GOALS}")

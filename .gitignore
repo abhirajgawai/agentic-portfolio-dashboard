@@ -54,5 +54,30 @@ dashboard/@/
 dashboard/e2e/*.png
 test-results/
 
+# pnpm artifacts — project uses npm; these are stray leftovers
+dashboard/pnpm-lock.yaml
+dashboard/pnpm-workspace.yaml
+
+# TypeScript build output
+dashboard/tsc_out.txt
+
+# Local run output / error capture
+err.txt
+out.txt
+# Stray artifact
+=
+
+# Local dev helper (not needed in repo)
+run-all.ps1
+
+# Throwaway dashboard scripts
+dashboard/scripts/check-daypnl.ts
+dashboard/scripts/test-milestones.ts
+
+# Design exploration docs (not final specs)
+docs/design/2026-08-20-chat-drawer-positioning.md
+docs/design/directions/2026-08-20-journey-shadcn-charts-direction-1.md
+docs/design/spec-allocation-donuts/
+
 # ---- opencode node_modules (its own .gitignore also covers this) ----
 .opencode/node_modules/

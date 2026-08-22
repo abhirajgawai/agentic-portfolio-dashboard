@@ -10,7 +10,7 @@
  */
 
 import type { EChartsOption } from 'echarts'
-import { useEffect, useRef } from 'react'
+import { memo, useEffect, useRef } from 'react'
 
 import { echarts } from '@/lib/charts'
 import { cn } from '@/lib/utils'
@@ -25,9 +25,16 @@ type EChartProps = {
   onEvents?: Record<string, (params: unknown) => void>
 }
 
-export function EChart({ option, height = 240, className, onEvents: _onEvents }: EChartProps) {
+/**
+ * Sparkline threshold: below this height (in px) we skip ResizeObserver because
+ * the table cell fixes the size. Avoids 69 ResizeObservers for in-row sparklines.
+ */
+const SPARKLINE_HEIGHT_THRESHOLD = 32
+
+export const EChart = memo(function EChart({ option, height = 240, className, onEvents: _onEvents }: EChartProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<ReturnType<typeof echarts.init> | null>(null)
+  const isSparkline = typeof height === 'number' && height <= SPARKLINE_HEIGHT_THRESHOLD
 
   // Create the chart instance once the container mounts; tear it down on unmount.
   useEffect(() => {
@@ -37,16 +44,20 @@ export function EChart({ option, height = 240, className, onEvents: _onEvents }:
     const chart = echarts.init(el, undefined, { renderer: 'canvas' })
     chartRef.current = chart
 
-    // Keep the chart sized to its container (responsive donuts / area chart).
-    const ro = new ResizeObserver(() => chart.resize())
-    ro.observe(el)
+    // For full-size charts, keep responsive via ResizeObserver.
+    // For sparklines (fixed cell height), skip — avoids forced reflows.
+    let ro: ResizeObserver | null = null
+    if (!isSparkline) {
+      ro = new ResizeObserver(() => chart.resize())
+      ro.observe(el)
+    }
 
     return () => {
-      ro.disconnect()
+      ro?.disconnect()
       chart.dispose()
       chartRef.current = null
     }
-  }, [])
+  }, [isSparkline])
 
   // Push new options whenever they change. notMerge so removed series don't linger.
   useEffect(() => {
@@ -60,4 +71,4 @@ export function EChart({ option, height = 240, className, onEvents: _onEvents }:
       style={{ height, width: '100%' }}
     />
   )
-}
+})

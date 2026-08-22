@@ -411,6 +411,99 @@ def _pick_real_account(payload: Any) -> str | None:
     return None
 
 
+# ---- live polling (M6) ------------------------------------------------------
+#
+# Fast live polls that update `position` in place WITHOUT writing to
+# position_snapshot, price_history, fx_rates, or runs. Ephemeral, no audit trail.
+# Uses the same collection logic as snapshots but with is_eod=False and
+# live_poll=True on persist().
+
+
+async def _live_poll_zerodha(*, port: int = DEFAULT_PORT, db_path: Path = DB_PATH) -> list[Holding]:
+    """Fetch live Zerodha holdings via daemon RPC and upsert to `position` only."""
+
+    # Ensure daemon is up (reuses the same logic as snapshots)
+    ensure_zerodha_daemon()
+    raw = _fetch(port, "get_holdings", {})
+
+    if _session_expired(raw):
+        send_snapshot_expiry_warning("zerodha", "session expired", settings=Settings())
+        raise SessionNotReady("Zerodha session expired - run `portfolio serve --platform zerodha` to re-login")
+
+    payload = raw.get("parse", [])
+    if not isinstance(payload, list):
+        raise SessionNotReady(f"unexpected holdings payload: {type(payload).__name__}")
+
+    holdings = normalize_zerodha(payload, sectors=load_sectors(), names=load_names())
+
+    # Persist to position table only (is_eod=False, live_poll=True skips fx_rates)
+    run_at = datetime.now(UTC).isoformat()
+    snapshot_date = datetime.now(UTC).astimezone(_IST).date().isoformat()
+    base = Settings().base_currency
+    db = _db_connection(db_path)
+    try:
+        # run_id=0 for live polls (no runs row)
+        persist(db, 0, run_at, holdings, snapshot_date, base, is_eod=False, live_poll=True)
+    finally:
+        db.close()
+    return holdings
+
+
+async def _live_poll_moomoo(*, db_path: Path = DB_PATH) -> tuple[list[Holding], str | None]:
+    """Fetch live Moomoo holdings via OpenD wrapper and upsert to `position` only."""
+    try:
+        holdings, acc_id = await _collect_moomoo()
+    except Exception as exc:  # noqa: BLE001
+        raise SessionNotReady(f"moomoo live poll failed: {exc}") from exc
+
+    # Persist to position table only (is_eod=False, live_poll=True skips fx_rates)
+    run_at = datetime.now(UTC).isoformat()
+    snapshot_date = datetime.now(UTC).astimezone(_IST).date().isoformat()
+    base = Settings().base_currency
+    db = _db_connection(db_path)
+    try:
+        persist(
+            db, 0, run_at, holdings, snapshot_date, base, is_eod=False, live_poll=True,
+            account_ref=acc_id or "",
+        )
+    finally:
+        db.close()
+    return holdings, acc_id
+
+
+def _live_poll(platform: str, db_path: Path = DB_PATH) -> dict[str, Any]:
+    """Run a live poll for the given platform and return fresh holdings JSON."""
+    import asyncio
+    from datetime import UTC, datetime
+
+    if platform not in ("zerodha", "moomoo", "all"):
+        raise ValueError(f"unknown platform: {platform!r}")
+
+    results: dict[str, Any] = {"holdings": [], "asOf": datetime.now(UTC).isoformat(), "platforms": {}}
+
+    if platform == "zerodha" or platform == "all":
+        try:
+            holdings = asyncio.run(_live_poll_zerodha(db_path=db_path))
+            results["holdings"].extend([h.as_record() for h in holdings])
+            results["platforms"]["zerodha"] = {"status": "ok", "count": len(holdings)}
+        except SessionNotReady as exc:
+            results["platforms"]["zerodha"] = {"status": "error", "error": str(exc)}
+        except Exception as exc:  # noqa: BLE001
+            results["platforms"]["zerodha"] = {"status": "error", "error": f"unexpected: {exc}"}
+
+    if platform == "moomoo" or platform == "all":
+        try:
+            holdings, acc_id = asyncio.run(_live_poll_moomoo(db_path=db_path))
+            results["holdings"].extend([h.as_record() for h in holdings])
+            results["platforms"]["moomoo"] = {"status": "ok", "count": len(holdings), "account": acc_id}
+        except SessionNotReady as exc:
+            results["platforms"]["moomoo"] = {"status": "error", "error": str(exc)}
+        except Exception as exc:  # noqa: BLE001
+            results["platforms"]["moomoo"] = {"status": "error", "error": f"unexpected: {exc}"}
+
+    return results
+
+
 # ---- persistence -----------------------------------------------------------
 #
 # The shared write path lives in portfolio.db.persist (MINOR-3) so snapshot,
@@ -423,6 +516,10 @@ def _pick_real_account(payload: Any) -> str | None:
 # serve.py waits up to 300s for the daily browser login; give the health poll
 # a little headroom so a successful login is never raced.
 DAEMON_START_TIMEOUT_SECONDS = 330.0
+# Wait for an existing daemon (e.g. the 09:35 scheduled one) to complete
+# authentication before spawning a replacement. The daemon may be in the
+# middle of the manual 2FA browser login when a snapshot run fires.
+DAEMON_AUTH_WAIT_SECONDS = 60.0
 DAEMON_LOG = DATA_DIR / "logs" / "zerodha_serve.log"
 
 
@@ -447,14 +544,37 @@ def ensure_zerodha_daemon(*, wait_seconds: float = DAEMON_START_TIMEOUT_SECONDS)
     health poll IS the login wait. Complete the 2FA in the browser and the
     snapshot proceeds by itself.
 
+    If a daemon process exists but isn't authenticated yet (e.g. the 09:35
+    scheduled daemon is still waiting for the user to complete 2FA in the
+    browser), we poll /health for up to 60 seconds waiting for auth to complete
+    before spawning a new daemon. This prevents a SECOND daemon and a SECOND
+    browser login prompt.
+
     Set PORTFOLIO_NO_DAEMON=1 to skip auto-launch (daemon managed elsewhere).
     """
     if os.environ.get("PORTFOLIO_NO_DAEMON"):
         return
     health = daemon_health()
     if health and health.get("ok"):
-        # Daemon up. Auth status is the leg's job (login_required -> warning).
-        return
+        # Daemon is up and connected to MCP. Check auth status.
+        if health.get("auth"):
+            # Fully healthy - ready to serve
+            return
+        # Daemon exists but not authenticated yet (waiting for 2FA).
+        # Wait for it to complete authentication before spawning a replacement.
+        logger.info("zerodha daemon exists but not authenticated yet - waiting up to %.0fs for auth", DAEMON_AUTH_WAIT_SECONDS)
+        deadline = time.monotonic() + DAEMON_AUTH_WAIT_SECONDS
+        while time.monotonic() < deadline:
+            time.sleep(3)
+            health = daemon_health()
+            if health and health.get("ok") and health.get("auth"):
+                logger.info("zerodha daemon authenticated during wait")
+                return
+            if not health:
+                # Daemon died while we were waiting - break to spawn new one
+                logger.warning("zerodha daemon disappeared during auth wait")
+                break
+        # Timed out or daemon died - fall through to spawn new one
     if not health:
         _spawn_zerodha_daemon()
     print(

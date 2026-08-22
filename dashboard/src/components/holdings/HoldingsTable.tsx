@@ -53,6 +53,12 @@ interface HoldingsTableProps {
   selectedTickerSet?: (ticker: string | null) => void
   /** Show the in-row platform-trend sparkline column (default false). */
   showSparkline?: boolean
+  /** Mixed-currency segments (e.g. Segments > Consolidated): render each row's
+   *  value in the HOLDING's own displayCurrency (SGD for moomoo, INR for the
+   *  INR legs) and label the column generically. When false (default), the
+   *  single `displayCurrency` prop labels and formats every row — the existing
+   *  behavior. */
+  perRowCurrency?: boolean
   /** Sidebar variant: compact rows, ticker+badge, name, value only. */
   variant?: 'default' | 'sidebar'
   /** Suppress the built-in header (count + search). Used when the parent provides its own. */
@@ -70,6 +76,7 @@ const HoldingsTableInner = memo(function HoldingsTableInner({
   showSparkline = false,
   variant = 'default',
   hideHeader = false,
+  perRowCurrency = false,
   className,
 }: HoldingsTableProps) {
   const isSidebar = variant === 'sidebar'
@@ -83,19 +90,20 @@ const HoldingsTableInner = memo(function HoldingsTableInner({
   // Sidebar variant suppresses sparklines regardless of prop
   const effectiveShowSparkline = isSidebar ? false : showSparkline
 
-  // Sparkline options per platform, computed at render time (buildSparklineOption
-  // is a pure function — no hooks — so calling it per platform in a loop is safe).
+  // Sparkline options per platform. Depends on the unique platforms in the data,
+  // NOT the holdings array identity (which would recreate on every parent render).
   // The contract has no per-holding history, so this is the platform trend,
   // honestly labeled by the column header ("Trend").
   const sparklineOptions = useMemo(() => {
     const map = new Map<string, ReturnType<typeof buildSparklineOption>>()
     if (!effectiveShowSparkline) return map
     const byPlatform = history.data?.byPlatform ?? {}
-    for (const platform of new Set(holdings.map((h) => h.platform))) {
+    const platforms = new Set(holdings.map((h) => h.platform))
+    for (const platform of platforms) {
       map.set(platform, buildSparklineOption(platform, byPlatform))
     }
     return map
-  }, [effectiveShowSparkline, history.data, holdings])
+  }, [effectiveShowSparkline, history.data])
 
   const columns = useMemo(
     () => {
@@ -164,10 +172,15 @@ const HoldingsTableInner = memo(function HoldingsTableInner({
 
       const valueCol = columnHelper.accessor('valueBase', {
         id: 'value',
-        header: () => `Value (${displayCurrency})`,
+        header: () => (perRowCurrency ? 'Value' : `Value (${displayCurrency})`),
         cell: (info) => (
           <span className="font-medium tabular-nums">
-            {masked ? MASK_TEXT : formatMoney(info.row.original.valueDisplay, displayCurrency)}
+            {masked
+              ? MASK_TEXT
+              : formatMoney(
+                  info.row.original.valueDisplay,
+                  perRowCurrency ? info.row.original.displayCurrency : displayCurrency,
+                )}
           </span>
         ),
         sortingFn: (a, b) => a.original.valueDisplay - b.original.valueDisplay,
@@ -179,6 +192,8 @@ const HoldingsTableInner = memo(function HoldingsTableInner({
         sortDescFirst: true,
       })
 
+      // sparklineCol accesses sparklineOptions via CLOSURE (not dep) so the
+      // columns array stays stable when sparklineOptions Map identity changes.
       const sparklineCol = columnHelper.display({
         id: 'sparkline',
         header: 'Trend',
@@ -222,7 +237,7 @@ const HoldingsTableInner = memo(function HoldingsTableInner({
         returnCol,
       ]
     },
-    [displayCurrency, masked, platformVisible, effectiveShowSparkline, sparklineOptions, isSidebar],
+    [displayCurrency, masked, platformVisible, effectiveShowSparkline, isSidebar, perRowCurrency],
   )
 
   // Stable data reference — only recreate when holdings array content changes

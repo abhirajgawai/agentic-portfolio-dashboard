@@ -11,7 +11,7 @@
 #   09:50 IST  PortfolioExportJsonMorning  dashboard JSON export (the morning "refresh")
 #   15:45 IST  PortfolioSnapshotEod        EOD snapshot
 #   15:50 IST  PortfolioTrades             daily trade capture for XIRR
-#   15:55 IST  PortfolioExportJson         dashboard JSON export (EOD)
+#   16:15 IST  PortfolioExportJson         dashboard JSON export (EOD) — 30 min buffer after EOD
 #   21:30 IST  PortfolioNavRefresh         AMFI NAV refresh (keyless)
 #   21:35 IST  PortfolioFxRefresh          FX refresh (keyless)
 #   22:30 IST  PortfolioSnapshotUs         mid-US-session LIVE snapshot (moomoo only; ~13:00 ET)
@@ -53,7 +53,7 @@ $Tasks = [ordered]@{
     'PortfolioExportJsonMorning'  = @('09:50', 'run_export.cmd')
     'PortfolioSnapshotEod'        = @('15:45', 'run_snapshot_eod.cmd')
     'PortfolioTrades'             = @('15:50', 'run_trades.cmd')
-    'PortfolioExportJson'         = @('15:55', 'run_export.cmd')
+    'PortfolioExportJson'         = @('16:15', 'run_export.cmd')
     'PortfolioNavRefresh'         = @('21:30', 'run_nav.cmd')
     'PortfolioFxRefresh'          = @('21:35', 'run_fx.cmd')
     'PortfolioSnapshotUs'         = @('22:30', 'run_us_snapshot.cmd')

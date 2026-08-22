@@ -785,6 +785,98 @@ Tokens live in `data/tokens.json` (gitignored), never in the DB or snapshots.
   `npm run check:contract`, bundle delta ≤ +50KB, WCAG AA in both themes,
   `prefers-reduced-motion` disables all animation.
 
+### M8.8 — Agent wake-on-demand (adopted 2026-08-20, verified live)
+- **Problem it solves:** the chat agent (`opencode serve`) is a long-lived dev
+  process that can be down (reboot, crash, closed terminal); the dashboard showed
+  an honest "agent offline" state but the user had to start `opencode serve` by
+  hand. Now the system wakes it.
+- **`src/portfolio/agent/wake.py` (new):** `ensure_agent_online()` — if
+  `OpenCodeClient().health()` (`/global/health` on 127.0.0.1:4096) is already true
+  → `"already-online"`; else spawn `opencode serve --port 4096 --hostname
+  127.0.0.1` **detached** (`CREATE_NO_WINDOW | DETACHED_PROCESS` on Windows — no
+  console popup, survives bridge restarts), `cwd=ROOT_DIR` (project config loads),
+  `env=os.environ` unchanged (**never strips `OPENCODE_SERVER_PASSWORD`** — the
+  spawned serve must share the client's Basic-auth env; eval_agent.py still strips
+  it for its unauthenticated ephemeral server). stdout/stderr → gitignored
+  `data/logs/opencode_serve.log`. Module-level `asyncio.Lock` + in-flight-task
+  sharing ⇒ at most ONE spawn per wake wave (two dashboard tabs can't double-spawn);
+  a still-alive previous spawn short-circuits to "started". Short early-exit watch
+  (2s) turns a dying process (busy port / EADDRINUSE / missing exe) into a clean
+  `AgentWakeError` — never a phantom "started". **No health poll after spawn** — the
+  UI's own ~10s poll is the source of truth. `resolve_opencode_exe()` lifts the
+  eval's OPENCODE_BIN → npm-path → bare-`opencode` resolution; `scripts/eval_agent.py`
+  now imports it (single source of truth).
+- **Bridge:** `POST /api/agent/wake` → `200 {ok, state: already-online|started}` |
+  `502 {ok: false, error}` — returns immediately, idempotent. `/api/ask` deliberately
+  keeps its exact 503 contract (the wake is an explicit UI action, per user choice —
+  NO self-heal inside ask).
+- **Dashboard:** footer `HealthTicker` gains an **agent status pill** (Bot icon, dot +
+  label per `useBackendHealth` state: `online`/`agent-offline`/`backend-offline` —
+  "bridge down" is a distinct label) · `ChatDrawer` **auto-wakes on open**: when
+  `agent:false` on mount it fires `wakeAgent()` best-effort, shows "Starting the
+  analyst…" while waking, and the offline banner gains a "Wake agent" retry button.
+  `types/bridge.ts` + `lib/api.ts` extended additively (`AgentWakeSchema` +
+  `wakeAgent()`); `contract.ts`/`data.ts` untouched. No idle-sleep (user choice).
+- ✅ Done when: the UI surfaces agent online/offline and opening the chat brings the
+  agent up. **Verification:** ruff clean; `uv run pytest` **202 passed / 2 skipped**
+  (10 new wake tests: already-online no-Popen, spawn args/cwd/env/log-path, concurrent
+  single-spawn, early-exit + missing-exe → AgentWakeError, bridge 200/200/502 mapping,
+  /api/ask 503 pin); `npm run typecheck` / `lint` (0 errors) / `build` (app chunk
+  **+2.81 kB raw** — under the +5KB budget) / `check:contract` all green. **Live E2E
+  (2026-08-20):** with the agent down (`agent:false`), `POST /api/agent/wake` →
+  `{"ok":true,"state":"started"}` and `/api/health` flipped `agent:true` within 2s;
+  a real `/api/ask` then answered "69 holdings, ₹1,02,74,287.21" in 1 turn via one
+  allowlisted tool (`portfolio_data_portfolio_total`) — numbers match the tool's
+  ground truth to the rupee. **Handover note:** the live E2E replaced the stale
+  serve/bridge (which had inconsistent `OPENCODE_SERVER_PASSWORD` env — the root
+  cause of the earlier permanent "agent offline"); the current serve (PID 10172) +
+  bridge (PID 10696) run detached from `data/logs/`, Vite untouched on :5174. If a
+  password-protected serve squats :4096 while the bridge lacks the matching env, the
+  wake fails honestly with a clean 502 (busy-port) — the fix is starting
+  serve+bridge from one shell so env matches (that is exactly what `npm run
+  dev:stack` does).
+
+### M8.9 — Goals in the DB (adopted 2026-08-21, gate: verified)
+- **Origin:** the user's goals ("Cross ₹2Cr", "Retirement ₹10Cr") silently reset to
+  defaults — localStorage (`dash-goals`) is origin-scoped and the Vite dev port had
+  drifted (5173→5174), so the new origin rendered `DEFAULT_GOALS`. Decision: goals are
+  real user state → move them to SQLite; % progress stays DERIVED (never stored).
+- **Schema (migration 0011, `user_version=11`, no seed rows per user choice):**
+  `goal(id PK AUTOINCREMENT, label NOT NULL, target_amount REAL NOT NULL CHECK(>0),
+  color DEFAULT '#6f7cff', crossed_at NULL, created_at, updated_at)`.
+- **CRUD + CLI:** `src/portfolio/goals.py` (add/list/get/update/delete, injected
+  db_path, auto-migrate, friendly validation errors) + `portfolio goal
+  add|list|update|delete`. Real partial UPDATE (kills the old remove+re-add edit hack).
+- **Export:** `scripts/export_json.py` writes the **6th contract file**
+  `dashboard/public/data/goals.json` `{asOf, valueBase, goals:[{id, label,
+  targetAmount, color, crossedAt}]}` — valueBase is the SAME variable as latest.json's
+  totals.valueBase (identity by construction). Tolerant block (last): a goals failure
+  never loses the five sibling files. **Crossing stamp:** idempotent UPDATE in a
+  short-lived rw connection (`target_amount <= valueBase AND crossed_at IS NULL`) —
+  the export that first sees a crossing ships its `crossedAt`; re-runs never restamp.
+- **Bridge:** `POST /api/goals` · `PATCH /api/goals/{id}` (partial) · `DELETE
+  /api/goals/{id}` — subprocess to the venv CLI only (bridge never touches SQLite),
+  then re-export so goals.json refreshes before responding; clean 422/404/502 mapping;
+  readback parses `goal list` output. CORS `allow_methods` fixed to include
+  PATCH/DELETE (pre-existing gap shared with property DELETE).
+- **Dashboard:** additive `GoalSchema`/`GoalsSchema` in contract.ts;
+  `loadGoals()`/`useGoalsData()` in data.ts; bridge mutation client in api.ts/bridge.ts;
+  GoalMilestones rewritten onto the query + mutations (skeleton/error/empty states,
+  acks keyed on stable DB ids); JourneyChart ReferenceLines from the same query.
+  BOTH localStorage stores deleted (`journey/goals.ts` key `dash-goals`, dead
+  `lib/goals.ts` key `portfolio.goals`). check-contract validates 6 files fail-loud.
+- ✅ Done when: goals persist across browsers/ports and % tracks net worth
+  automatically. **Verification:** ruff clean; `uv run pytest` exit 0 (222 passed /
+  2 skipped per worker counts; +20 tests over the 202 baseline); `npm run typecheck`
+  / `lint` (0 errors) / `build` (+1.7 kB app chunk) green; `check:contract` all SIX
+  files ok with goals.json valueBase == latest.json valueBase (10257254.73); live E2E:
+  CLI add → export → goal present WITH auto-stamped `crossedAt` (₹10L target vs ₹1.02Cr
+  value) → delete → export → clean `[]`. **Ops note:** the long-running bridge process
+  predates this feature — restart it (`npm run dev:stack`) before using the UI's
+  goal add/edit/delete buttons. Progress % derives at render from
+  `latest.totals.valueBase / targetAmount`, so every scheduled export (09:50 / 15:55 /
+  22:35 IST) updates it automatically.
+
 ### M9 — Deployment (2–3 evenings)
 - Migrate SQLite → Supabase (schema ports 1:1) — the shared spine: local legs and cloud
   legs write the SAME store (SQLite's single-writer rule forbids two hosts).

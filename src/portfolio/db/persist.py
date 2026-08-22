@@ -41,8 +41,13 @@ def persist(
     is_eod: bool,
     *,
     account_ref: str = "",
+    live_poll: bool = False,
 ) -> None:
-    """Write one run of holdings: live position always, history only on EOD."""
+    """Write one run of holdings: live position always, history only on EOD.
+
+    When `live_poll=True`, skips the `ensure_display_rates()` call (FX rates for
+    display currencies) so live polls don't write to fx_rates at all.
+    """
     if not holdings:
         return
     platform = holdings[0].platform
@@ -92,7 +97,9 @@ def persist(
 
     # The dashboard shows the account leg in its display currency (moomoo -> SGD),
     # so persist those rates too - they come from the SAME er-api fetch (cached).
-    ensure_display_rates(db, snapshot_date, base, settings)
+    # Skip for live polls: no fx_rates writes at all (ephemeral).
+    if not live_poll:
+        ensure_display_rates(db, snapshot_date, base, settings)
 
 
 def ensure_display_rates(

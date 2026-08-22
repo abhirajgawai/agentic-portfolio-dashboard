@@ -5,13 +5,11 @@
  */
 
 import { useState, useRef, useEffect } from 'react'
-import { Sun, Moon, Eye, EyeOff, Check, Monitor, RefreshCw, MessageSquare, Clock } from 'lucide-react'
+import { Sun, Moon, Eye, EyeOff, Check, Monitor, RefreshCw, MessageSquare } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { useTheme, usePrivacy } from '@/lib'
 import { cn } from '@/lib/utils'
-import { formatAsOfLong } from '@/lib/format'
-import type { BackendHealthState } from '@/lib/useBackendHealth'
 import type { RefreshState } from '@/lib/useRefresh'
 import { type WorkspaceId, WORKSPACES } from '@/lib/workspaces'
 
@@ -30,7 +28,6 @@ export function Header({
   workspace,
   onWorkspaceChange,
   refresh,
-  health,
 }: {
   chatOpen?: boolean
   onChatToggle?: () => void
@@ -38,8 +35,6 @@ export function Header({
   onWorkspaceChange: (ws: WorkspaceId) => void
   /** Refresh state machine (lifted to AppShell so the reload banner can suppress on manual refresh). */
   refresh: { state: RefreshState; run: () => Promise<'done' | 'error'>; reset: () => void }
-  /** Live backend health (for the "last refreshed" stamp). */
-  health?: BackendHealthState
 }) {
   const { theme, setTheme } = useTheme()
   const { masked, toggleMasked } = usePrivacy()
@@ -176,16 +171,6 @@ export function Header({
 
       {/* ==== ACTION BUTTONS ==== */}
       <div className="flex items-center gap-0.5">
-        {/* "Last refreshed" stamp (next to Refresh so it's seen as a refresh target).
-            Live via the health poll; falls back to "—" when the bridge is unreachable. */}
-        <span
-          className="hidden sm:flex items-center gap-1.5 text-xs text-muted-foreground"
-          title="Dashboard export files last regenerated. Data as of appears on hover via the footer."
-        >
-          <Clock className="size-3 opacity-50" aria-hidden="true" />
-          <span>Last refresh {formatAsOfLong(health?.exportsGeneratedAt)}</span>
-        </span>
-
         {/* Refresh */}
         <Button
           type="button"
@@ -213,6 +198,7 @@ export function Header({
         {/* Chat */}
         <Button
           type="button"
+          id="chat-toggle"
           variant="ghost"
           size="sm"
           onClick={onChatToggle}

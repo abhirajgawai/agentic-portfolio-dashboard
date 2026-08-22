@@ -52,20 +52,16 @@ from pathlib import Path
 sys.stdout.reconfigure(errors="replace")
 
 from portfolio.agent.client import DEFAULT_AUDIT_PATH, AgentResult, OpenCodeClient  # noqa: E402
+from portfolio.agent.wake import resolve_opencode_exe  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH = ROOT / ".opencode" / "opencode.json"
 AGENT_NAME = "portfolio-analyst"
-_bin = os.environ.get("OPENCODE_BIN", "").strip()
-_candidate = Path(_bin) if _bin else None
-OPENCODE_EXE = (
-    _candidate
-    if _candidate is not None and _candidate.exists()
-    else Path(r"C:\Users\Abhiraj Gautam Gavai\AppData\Roaming\npm\node_modules\opencode-ai\bin\opencode.exe")
-)
-if not OPENCODE_EXE.exists():
-    # Fall back to a bare `opencode` on PATH (cmd shim - needs shell=True).
-    OPENCODE_EXE = Path("opencode")
+# The exe resolution (OPENCODE_BIN env override -> the known npm install path
+# -> a bare `opencode` on PATH for the cmd shim) lives in the wake module and
+# is shared with the bridge's wake endpoint - behavior is identical to the
+# block it replaces.
+OPENCODE_EXE = resolve_opencode_exe()
 
 DEFAULT_MAX_TURNS = 12
 DEFAULT_TIMEOUT_S = 180.0

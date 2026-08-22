@@ -36,6 +36,8 @@ fx_app = typer.Typer(help="Foreign exchange commands (daily rate table, keyless)
 app.add_typer(fx_app, name="fx")
 prop_app = typer.Typer(help="Real estate property import (manual valuation entry).")
 app.add_typer(prop_app, name="property")
+goal_app = typer.Typer(help="Savings goals (dashboard journey goals, M8.9).")
+app.add_typer(goal_app, name="goal")
 
 logger = logging.getLogger("portfolio.cli")
 
@@ -347,6 +349,78 @@ def prop_import(
     typer.echo(f"property import: {result}")
 
 
+@goal_app.command("add")
+def goal_add(
+    label: Annotated[str, typer.Option("--label", help="goal name, e.g. 'Emergency fund'")],
+    target: Annotated[float, typer.Option("--target", help="target amount (> 0)")],
+    color: Annotated[str | None, typer.Option("--color", help="hex color, e.g. '#22c55e'")] = None,
+) -> None:
+    """Add a savings goal (targets only - progress is derived at read time)."""
+    from portfolio.goals import add_goal
+
+    try:
+        goal = add_goal(label, target, color=color)
+    except ValueError as exc:
+        typer.echo(f"goal add: FAILED - {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    typer.echo(
+        f"goal added: #{goal['id']} {goal['label']}"
+        f" target={goal['target_amount']:,.2f} color={goal['color']}"
+    )
+
+
+@goal_app.command("list")
+def goal_list() -> None:
+    """List savings goals (creation order, one line each)."""
+    from portfolio.goals import list_goals
+
+    goals = list_goals()
+    if not goals:
+        typer.echo('no goals yet - add one: portfolio goal add --label "..." --target N')
+        return
+    for g in goals:
+        crossed = f" crossed_at={g['crossed_at']}" if g["crossed_at"] else ""
+        typer.echo(
+            f"#{g['id']}  {g['label']}  target={g['target_amount']:,.2f}"
+            f"  color={g['color']}{crossed}"
+        )
+
+
+@goal_app.command("update")
+def goal_update(
+    goal_id: Annotated[int, typer.Argument(help="goal id (see: portfolio goal list)")],
+    label: Annotated[str | None, typer.Option("--label", help="new label")] = None,
+    target: Annotated[float | None, typer.Option("--target", help="new target amount (> 0)")] = None,
+    color: Annotated[str | None, typer.Option("--color", help="new hex color")] = None,
+) -> None:
+    """Update a goal (partial - only the given fields change)."""
+    from portfolio.goals import update_goal
+
+    try:
+        goal = update_goal(goal_id, label=label, target_amount=target, color=color)
+    except ValueError as exc:
+        typer.echo(f"goal update: FAILED - {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    typer.echo(
+        f"goal updated: #{goal['id']} {goal['label']}"
+        f" target={goal['target_amount']:,.2f} color={goal['color']}"
+    )
+
+
+@goal_app.command("delete")
+def goal_delete(
+    goal_id: Annotated[int, typer.Argument(help="goal id (see: portfolio goal list)")],
+) -> None:
+    """Delete a savings goal."""
+    from portfolio.goals import delete_goal
+
+    if delete_goal(goal_id):
+        typer.echo(f"goal deleted: #{goal_id}")
+    else:
+        typer.echo(f"goal delete: FAILED - goal #{goal_id} not found", err=True)
+        raise typer.Exit(code=1)
+
+
 def _opend_reachable(host: str = "127.0.0.1", port: int = 11111) -> bool:
     import socket
 
@@ -499,6 +573,55 @@ def snapshot(
         typer.echo(f"snapshot {platform}: FAILED - unexpected error: {exc}", err=True)
         raise typer.Exit(code=1) from exc
     typer.echo(f"snapshot {platform}: {result}")
+
+
+@app.command("live")
+def live(
+    platform: Annotated[str, typer.Option(help="zerodha | moomoo | all")] = "all",
+    timeout: Annotated[int, typer.Option(help="total timeout in seconds")] = 30,
+) -> None:
+    """Fast live poll - updates `position` in place, NO snapshot/history/fx/runs writes.
+
+    Ephemeral poll for dashboards/refresh: calls Zerodha daemon RPC + Moomoo OpenD
+    wrapper, upserts to `position` table only (is_eod=False, live_poll=True),
+    returns fresh holdings JSON to stdout. No calendar gate, no audit trail.
+
+    Output: {"holdings": [...], "asOf": "...", "platforms": {"zerodha": {...}, "moomoo": {...}}}
+    """
+    import json
+    import signal
+    import sys
+
+    from portfolio.config import DB_PATH
+    from portfolio.logging import setup_logging
+    from portfolio.snapshot import SessionNotReady, _live_poll
+
+    # Redirect logs to stderr so JSON on stdout stays clean
+    setup_logging(stream=sys.stderr)
+
+    # Timeout handler
+    def _timeout_handler(signum, frame):
+        raise TimeoutError(f"live poll exceeded {timeout}s")
+
+    # Set alarm for timeout (Unix) - on Windows we rely on the HTTP timeouts
+    if hasattr(signal, "SIGALRM"):
+        signal.signal(signal.SIGALRM, _timeout_handler)
+        signal.alarm(timeout)
+
+    try:
+        result = _live_poll(platform, db_path=DB_PATH)
+    except SessionNotReady as exc:
+        typer.echo(f"live {platform}: FAILED - {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    except Exception as exc:  # noqa: BLE001
+        logger.error("live %s crashed: %s", platform, exc)
+        typer.echo(f"live {platform}: FAILED - unexpected error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    finally:
+        if hasattr(signal, "SIGALRM"):
+            signal.alarm(0)
+
+    typer.echo(json.dumps(result, separators=(",", ":")))
 
 
 @app.command("returns")

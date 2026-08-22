@@ -6,9 +6,14 @@ Endpoints:
 
     GET  /api/health   -> {pipeline: {asOf, exportsPresent, exportsGeneratedAt}, agent: bool}
     POST /api/refresh  -> {ok: true, summary} | 502 {ok: false, error}
+    POST /api/live     -> {ok: true, holdings, asOf, platforms} | 502 {ok: false, error}
     POST /api/cas/import -> {ok: true, import, export} | 502 {ok: false, error}
     POST /api/property/import -> {ok: true, import, export} | 502 {ok: false, error}
     DELETE /api/property/{id} -> {ok: true, deleted, export} | 502 {ok: false, error}
+    POST /api/goals -> {ok: true, goal} | 422/404/502 {ok: false, error}
+    PATCH /api/goals/{id} -> {ok: true, goal} | 422/404/502 {ok: false, error}
+    DELETE /api/goals/{id} -> {ok: true, deleted, export} | 404/502 {ok: false, error}
+    POST /api/agent/wake -> {ok: true, state: "already-online"|"started"} | 502 {ok: false, error}
     POST /api/ask      -> {answer, toolCalls, turns, withinBudget} | 503
 
 Guardrails:
@@ -30,6 +35,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
+import re
 import subprocess
 import sys
 from datetime import UTC, datetime
@@ -40,6 +47,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from portfolio.agent.client import OpenCodeClient
+from portfolio.agent.wake import AgentWakeError, ensure_agent_online
 from portfolio.config import ROOT_DIR
 
 logger = logging.getLogger("portfolio.bridge")
@@ -60,7 +68,7 @@ CORS_ORIGINS = [
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE"],
     allow_headers=["Content-Type"],
 )
 
@@ -68,6 +76,12 @@ app.add_middleware(
 # (daemon RPC + OpenD) and can take minutes; the export is a quick DB read.
 REFRESH_TIMEOUT_S = 900
 EXPORT_TIMEOUT_S = 120
+
+# Live fetch budget: 35s (broker calls + normalization; 30s CLI + buffer)
+LIVE_TIMEOUT_S = 35
+
+# Goal CLI budget: a fast local SQLite write via `portfolio goal` (M8.9).
+GOAL_TIMEOUT_S = 30
 
 DATA_DIR = ROOT_DIR / "dashboard" / "public" / "data"
 
@@ -148,6 +162,143 @@ def _run_pipeline() -> dict:
             "stderr": (export.stderr or "").strip()[-2000:],
         },
     }
+
+
+def _run_live_fetch() -> dict:
+    """Fetch live holdings from all platforms (zerodha + moomoo) without DB persistence.
+
+    Returns normalized holdings with dayPnl, dayChangePct, valueBase, etc.
+    Mirrors the snapshot logic but skips persistence and runs in a single process.
+    """
+    from portfolio.config import Settings
+    from portfolio.fx import get_fx_rates
+    from portfolio.normalize.sectors import load_names, load_sectors
+    from portfolio.normalize.zerodha import normalize_holdings as normalize_zerodha
+    from portfolio.snapshot import (
+        DEFAULT_PORT,
+        SessionNotReady,
+        _collect_moomoo,
+        _fetch,
+        _session_expired,
+        ensure_zerodha_daemon,
+    )
+
+    # ---- Zerodha leg ----
+    zerodha_holdings = []
+    zerodha_status = "ok"
+    zerodha_error = None
+
+    try:
+        ensure_zerodha_daemon()
+        raw = _fetch(DEFAULT_PORT, "get_holdings", {})
+        if _session_expired(raw):
+            raise SessionNotReady("Zerodha session expired")
+        payload = raw.get("parse", [])
+        if not isinstance(payload, list):
+            raise SessionNotReady(f"unexpected holdings payload: {type(payload).__name__}")
+        zerodha_holdings = normalize_zerodha(payload, sectors=load_sectors(), names=load_names())
+    except SessionNotReady as exc:
+        zerodha_status = "error"
+        zerodha_error = str(exc)
+    except Exception as exc:  # noqa: BLE001
+        zerodha_status = "error"
+        zerodha_error = f"{type(exc).__name__}: {exc}"
+
+    # ---- Moomoo leg ----
+    moomoo_holdings = []
+    moomoo_status = "ok"
+    moomoo_error = None
+
+    try:
+        import asyncio
+
+        holdings, _ = asyncio.run(_collect_moomoo())
+        moomoo_holdings = holdings
+    except SessionNotReady as exc:
+        moomoo_status = "error"
+        moomoo_error = str(exc)
+    except Exception as exc:  # noqa: BLE001
+        moomoo_status = "error"
+        moomoo_error = f"{type(exc).__name__}: {exc}"
+
+    all_holdings = zerodha_holdings + moomoo_holdings
+
+    # ---- FX rates (one rate per run) ----
+    base = Settings().base_currency
+    currencies = sorted({h.currency for h in all_holdings})
+    rates = get_fx_rates(base, currencies)
+    rates[base] = 1.0
+
+    # ---- Build holdings output with valueBase, dayPnl, etc. ----
+    holdings_out = []
+    for h in all_holdings:
+        fx_rate = rates.get(h.currency, 1.0)
+        value_base = h.current_value * fx_rate
+        cost_base = h.cost_basis * fx_rate if h.cost_basis else None
+
+        return_pct = None
+        if cost_base:
+            return_pct = round((value_base - cost_base) / cost_base * 100.0, 2)
+
+        holdings_out.append({
+            "platform": h.platform,
+            "geography": h.geography,
+            "ticker": h.ticker,
+            "name": h.name,
+            "isin": h.isin,
+            "currency": h.currency,
+            "qty": h.quantity,
+            "avgPrice": h.avg_price,
+            "ltp": h.current_price,
+            "value": h.current_value,
+            "valueBase": round(value_base, 2),
+            "valueDisplay": round(value_base, 2),  # base == display for live
+            "displayCurrency": base,
+            "asOf": datetime.now(UTC).isoformat(),
+            "returnPct": return_pct,
+            "dayPnl": h.day_change_ccy,
+            "dayChangePct": round(h.day_change_pct, 2) if h.day_change_pct is not None else None,
+            "pnl": h.pnl_ccy,
+            "pnlPct": round(h.pnl_pct, 2) if h.pnl_pct is not None else None,
+            "canSellQty": h.can_sell_qty,
+            "positionSide": h.position_side,
+            "sector": h.sector,
+            "assetClass": h.asset_class,
+        })
+
+    # ---- Platform summary ----
+    platforms = {
+        "zerodha": {"holdings": len(zerodha_holdings), "status": zerodha_status},
+        "moomoo": {"holdings": len(moomoo_holdings), "status": moomoo_status},
+    }
+    if zerodha_error:
+        platforms["zerodha"]["error"] = zerodha_error
+    if moomoo_error:
+        platforms["moomoo"]["error"] = moomoo_error
+
+    return {
+        "holdings": holdings_out,
+        "asOf": datetime.now(UTC).isoformat(),
+        "platforms": platforms,
+    }
+
+
+@app.post("/api/live")
+async def live() -> JSONResponse:
+    """Fetch fresh live holdings from all platforms; 200 {ok, holdings, asOf, platforms} or clean 502."""
+    try:
+        result = await asyncio.wait_for(
+            asyncio.to_thread(_run_live_fetch),
+            timeout=LIVE_TIMEOUT_S,
+        )
+    except TimeoutError:
+        logger.error("live fetch timed out after %ds", LIVE_TIMEOUT_S)
+        return JSONResponse(status_code=502, content={"ok": False, "error": "live fetch timed out"})
+    except Exception as exc:  # noqa: BLE001 - clean 502, never a traceback
+        logger.exception("live fetch failed")
+        return JSONResponse(status_code=502, content={"ok": False, "error": f"{type(exc).__name__}: {exc}"})
+
+    return JSONResponse(content={"ok": True, **result})
 
 
 @app.post("/api/refresh")
@@ -363,6 +514,235 @@ finally:
         return JSONResponse(status_code=502, content={"ok": False, "error": f"{type(exc).__name__}: {exc}"})
 
 
+# -- M8.9 savings goals (same seam as properties: subprocess to the venv CLI,
+#    never direct DB access) -------------------------------------------------
+
+
+class GoalCreateRequest(BaseModel):
+    """Request body for creating a savings goal (camelCase per the UI contract)."""
+
+    label: str
+    targetAmount: float
+    color: str | None = None
+
+
+class GoalUpdateRequest(BaseModel):
+    """Partial update body - only the provided fields reach `goal update`."""
+
+    label: str | None = None
+    targetAmount: float | None = None
+    color: str | None = None
+
+
+# `portfolio goal list` prints one human line per goal:
+#   #3  Emergency fund  target=5,00,000.00  color=#6f7cff [crossed_at=<iso>]
+_GOAL_LINE_RE = re.compile(
+    r"^#(?P<id>\d+)\s+(?P<label>.+?)\s+target=(?P<target>[\d,]+(?:\.\d+)?)"
+    r"\s+color=(?P<color>\S+?)(?:\s+crossed_at=(?P<crossed>.+))?$"
+)
+
+
+def _goal_from_list_output(stdout: str) -> dict | None:
+    """Newest goal (max id) parsed from `portfolio goal list` output.
+
+    Readback choice: the CLI is owned elsewhere and prints human lines only,
+    so the bridge parses them rather than touching SQLite directly (hard rule)
+    or editing another owner's file. PATCH needs this too - a partial update
+    means the bridge does not know the untouched fields.
+    """
+    best: dict | None = None
+    for line in stdout.splitlines():
+        m = _GOAL_LINE_RE.match(line.strip())
+        if not m:
+            continue
+        goal = {
+            "id": int(m.group("id")),
+            "label": m.group("label"),
+            "targetAmount": float(m.group("target").replace(",", "")),
+            "color": m.group("color"),
+            "crossedAt": m.group("crossed"),
+        }
+        if best is None or goal["id"] > best["id"]:
+            best = goal
+    return best
+
+
+def _run_goal_cli(args: list[str]) -> subprocess.CompletedProcess:
+    """Run a read/write `portfolio goal` subcommand in the venv interpreter."""
+    return subprocess.run(
+        [sys.executable, "-m", "portfolio.cli", "goal", *args],
+        capture_output=True,
+        text=True,
+        timeout=GOAL_TIMEOUT_S,
+        cwd=ROOT_DIR,
+    )
+
+
+def _run_export_cli() -> subprocess.CompletedProcess:
+    """Regenerate dashboard/public/data/*.json - the same export invocation
+    the property endpoints make after every mutation."""
+    return subprocess.run(
+        [sys.executable, "scripts/export_json.py"],
+        capture_output=True,
+        text=True,
+        timeout=EXPORT_TIMEOUT_S,
+        cwd=ROOT_DIR,
+    )
+
+
+def _invalid_target_response(amount: float) -> JSONResponse | None:
+    """422 when targetAmount is not finite and > 0 - rejected BEFORE shelling
+    out (isfinite also rejects inf, which would pass a bare > 0 check)."""
+    if not math.isfinite(amount) or amount <= 0:
+        return JSONResponse(
+            status_code=422,
+            content={"ok": False, "error": "targetAmount must be a finite number greater than 0"},
+        )
+    return None
+
+
+def _goal_cli_error(result: subprocess.CompletedProcess, action: str) -> JSONResponse:
+    """Map a failed goal CLI run to a clean non-2xx response: 404-style when
+    the id was not found, else 502 carrying the CLI's own FAILED reason."""
+    detail = ((result.stderr or "") + (result.stdout or "")).strip()[-500:]
+    if "not found" in detail:
+        return JSONResponse(status_code=404, content={"ok": False, "error": detail})
+    return JSONResponse(status_code=502, content={"ok": False, "error": f"goal {action} failed: {detail}"})
+
+
+def _export_error(result: subprocess.CompletedProcess) -> JSONResponse:
+    return JSONResponse(
+        status_code=502,
+        content={"ok": False, "error": f"export failed: {(result.stderr or '').strip()[-500:]}"},
+    )
+
+
+@app.post("/api/goals")
+async def goal_create(req: GoalCreateRequest) -> JSONResponse:
+    """Create a savings goal from the UI.
+
+    Runs `portfolio goal add`, reads the created row back via `goal list`
+    parse, then regenerates the dashboard exports. 422 on a bad target before
+    any subprocess; clean 404/502 mapping otherwise - never a traceback.
+    """
+    try:
+        invalid = _invalid_target_response(req.targetAmount)
+        if invalid:
+            return invalid
+
+        args = ["add", "--label", req.label, "--target", str(req.targetAmount)]
+        if req.color:
+            args += ["--color", req.color]
+        result = _run_goal_cli(args)
+        if result.returncode != 0:
+            logger.error("goal add failed: %s", result.stderr)
+            return _goal_cli_error(result, "add")
+
+        listing = _run_goal_cli(["list"])
+        goal = _goal_from_list_output(listing.stdout or "")
+
+        export = _run_export_cli()
+        if export.returncode != 0:
+            logger.error("export_json failed after goal add: %s", export.stderr)
+            return _export_error(export)
+
+        if goal is None:
+            return JSONResponse(
+                status_code=502,
+                content={"ok": False, "error": "goal created but could not be read back"},
+            )
+        return JSONResponse(content={"ok": True, "goal": goal})
+    except subprocess.TimeoutExpired:
+        logger.error("goal add timed out")
+        return JSONResponse(status_code=502, content={"ok": False, "error": "goal add timed out"})
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("goal create failed")
+        return JSONResponse(status_code=502, content={"ok": False, "error": f"{type(exc).__name__}: {exc}"})
+
+
+@app.patch("/api/goals/{goal_id}")
+async def goal_update(goal_id: int, req: GoalUpdateRequest) -> JSONResponse:
+    """Partially update a savings goal - only provided fields are passed to
+    `goal update`; the full row is read back via `goal list` parse and the
+    dashboard exports are regenerated. Unknown id -> clean 404-style error."""
+    try:
+        if req.label is None and req.targetAmount is None and req.color is None:
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "ok": False,
+                    "error": "nothing to update - pass at least one of label/targetAmount/color",
+                },
+            )
+        if req.targetAmount is not None:
+            invalid = _invalid_target_response(req.targetAmount)
+            if invalid:
+                return invalid
+
+        args = ["update", str(goal_id)]
+        if req.label is not None:
+            args += ["--label", req.label]
+        if req.targetAmount is not None:
+            args += ["--target", str(req.targetAmount)]
+        if req.color is not None:
+            args += ["--color", req.color]
+        result = _run_goal_cli(args)
+        if result.returncode != 0:
+            logger.error("goal update failed: %s", result.stderr)
+            return _goal_cli_error(result, "update")
+
+        listing = _run_goal_cli(["list"])
+        goal = _goal_from_list_output(listing.stdout or "")
+
+        export = _run_export_cli()
+        if export.returncode != 0:
+            logger.error("export_json failed after goal update: %s", export.stderr)
+            return _export_error(export)
+
+        if goal is None:
+            return JSONResponse(
+                status_code=502,
+                content={"ok": False, "error": "goal updated but could not be read back"},
+            )
+        return JSONResponse(content={"ok": True, "goal": goal})
+    except subprocess.TimeoutExpired:
+        logger.error("goal update timed out")
+        return JSONResponse(status_code=502, content={"ok": False, "error": "goal update timed out"})
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("goal update failed")
+        return JSONResponse(status_code=502, content={"ok": False, "error": f"{type(exc).__name__}: {exc}"})
+
+
+@app.delete("/api/goals/{goal_id}")
+async def goal_delete(goal_id: int) -> JSONResponse:
+    """Delete a savings goal via `portfolio goal delete`, then regenerate the
+    dashboard exports. Missing id -> clean 404-style {ok: false, error}."""
+    try:
+        result = _run_goal_cli(["delete", str(goal_id)])
+        if result.returncode != 0:
+            logger.error("goal delete failed: %s", result.stderr)
+            return _goal_cli_error(result, "delete")
+
+        export = _run_export_cli()
+        if export.returncode != 0:
+            logger.error("export_json failed after goal delete: %s", export.stderr)
+            return _export_error(export)
+
+        return JSONResponse(
+            content={
+                "ok": True,
+                "deleted": goal_id,
+                "export": (export.stdout or "").strip()[-2000:],
+            }
+        )
+    except subprocess.TimeoutExpired:
+        logger.error("goal delete timed out")
+        return JSONResponse(status_code=502, content={"ok": False, "error": "goal delete timed out"})
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("goal delete failed")
+        return JSONResponse(status_code=502, content={"ok": False, "error": f"{type(exc).__name__}: {exc}"})
+
+
 @app.post("/api/cas/import")
 async def cas_import(file: UploadFile, password: str = "") -> JSONResponse:
     """Import a CAS PDF (Consolidated Account Statement) — the free monthly
@@ -440,6 +820,27 @@ async def cas_import(file: UploadFile, password: str = "") -> JSONResponse:
     except Exception as exc:  # noqa: BLE001
         logger.exception("CAS import failed")
         return JSONResponse(status_code=502, content={"ok": False, "error": f"{type(exc).__name__}: {exc}"})
+
+
+@app.post("/api/agent/wake")
+async def agent_wake() -> JSONResponse:
+    """Wake the M7 agent on demand: spawn `opencode serve` detached when it
+    is offline, otherwise report it already online.
+
+    Returns 200 {ok, state} where state is "already-online" or "started", or
+    a clean 502 {ok: false, error} - never a traceback. Does NOT wait for
+    health: the UI's own health poll confirms the server; this endpoint only
+    makes the spawn decision.
+    """
+    try:
+        state = await ensure_agent_online()
+    except AgentWakeError as exc:
+        logger.error("agent wake failed: %s", exc)
+        return JSONResponse(status_code=502, content={"ok": False, "error": str(exc)})
+    except Exception as exc:  # noqa: BLE001 - clean 502, never a traceback
+        logger.exception("agent wake failed")
+        return JSONResponse(status_code=502, content={"ok": False, "error": f"{type(exc).__name__}: {exc}"})
+    return JSONResponse(content={"ok": True, "state": state})
 
 
 @app.post("/api/ask")
