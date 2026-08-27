@@ -313,12 +313,22 @@ _SNAPSHOT_PLATFORMS = frozenset({"zerodha", "moomoo"})
 
 
 def _run_snapshot(platform: str) -> dict:
-    """Run `snapshot --platform <platform> --force` then export_json.py —
+    """Run `snapshot --platform <platform> --force --eod` then export_json.py —
     same shape as _run_pipeline but scoped to one leg (the Jobs status
     screen's per-platform "take snapshot now" button). Always --force: the
-    button is meant to work outside market hours too, for on-demand checks."""
+    button is meant to work outside market hours too, for on-demand checks.
+
+    Always --eod too (2026-08-27): db/persist.py only writes position_snapshot
+    - the row history.json/AccountRoads is derived from - when is_eod=True;
+    without it this only updates the live `position` table. The scheduled
+    PortfolioSnapshotEod task used to be the sole is_eod=True writer for
+    zerodha/moomoo; now that scheduled snapshots are gone in favor of
+    on-demand triggers (laptop isn't always on), THIS is the only remaining
+    place that can advance the daily history series for these platforms - so
+    it must write one, not just refresh the live total.
+    """
     snapshot = subprocess.run(
-        [sys.executable, "-m", "portfolio.cli", "snapshot", "--platform", platform, "--force"],
+        [sys.executable, "-m", "portfolio.cli", "snapshot", "--platform", platform, "--force", "--eod"],
         capture_output=True,
         text=True,
         timeout=REFRESH_TIMEOUT_S,
