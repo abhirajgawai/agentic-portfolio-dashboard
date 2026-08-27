@@ -8,9 +8,9 @@
  *
  * Slots (spec §3.2): header (icon + label + count badge + chevron), value
  * (₹ headline + per-segment sub-line), pnl (broker-LIVE day P&L; "—" + honest
- * note for Groww-CAS, which has no live legs), return (simple return + cost
- * coverage — never hidden), meta (staleness badge/fresh dot + per-platform
- * as-of tooltip).
+ * note for CAS-derived legs, which have no live day P&L), return (simple
+ * return + cost coverage — never hidden), meta (staleness badge/fresh dot +
+ * per-platform as-of tooltip).
  *
  * A11y (spec §7.2): whole-card button, `aria-pressed` on the active-ring
  * state, focus ring via ring-ring (AA in both themes), stale badge with a
@@ -20,7 +20,7 @@
  */
 
 import { useMemo } from 'react'
-import { ChevronRight, Globe2, Landmark, Layers, MapPin } from 'lucide-react'
+import { ChevronRight, Globe2, Layers, MapPin } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -34,7 +34,6 @@ import { cn } from '@/lib/utils'
 const SEGMENT_ICONS = {
   us: Globe2,
   india: MapPin,
-  cas: Landmark,
   consolidated: Layers,
 } as const
 
@@ -143,8 +142,6 @@ export function SegmentCard({
     valueSubLine = masked
       ? `incl. real estate ${MASK_TEXT}`
       : `incl. real estate ${formatInrCompact(realEstateValue)}`
-  } else if (segment.id === 'cas') {
-    valueSubLine = 'CAS import + AMFI NAV'
   } else {
     valueSubLine = 'all platforms'
   }

@@ -877,6 +877,49 @@ Tokens live in `data/tokens.json` (gitignored), never in the DB or snapshots.
   `latest.totals.valueBase / targetAmount`, so every scheduled export (09:50 / 15:55 /
   22:35 IST) updates it automatically.
 
+### M8.10 — Automated CAS request + Gmail auto-import (adopted 2026-08-24, live)
+- **Full detail: `docs/CAMS_KFINTECH_CAS_PLAN.md`** (as-built reference, not just a
+  plan — read it before touching any file below; §8 documents 8 real bugs found via
+  live testing that are easy to reintroduce). This entry is a pointer/summary only.
+- **Origin:** M3's Groww CAS import was manual-only (download an emailed PDF once a
+  month, upload by hand). Investigated casparser.in's paid API first — dead end,
+  the needed endpoint requires ₹3,500/mo (confirmed live, not just their docs).
+  Found instead that CAMS's own free public "CAS - CAMS+KFintech" mailback form
+  (camsonline.com) has **no CAPTCHA** (verified via live DOM inspection) — makes
+  full headless automation possible with zero vendor cost and no human step.
+- **What it does:** every N days (default 2, UI-configurable, not market-hours
+  gated — this data isn't intraday), a headless Playwright browser submits the
+  CAMS form → CAMS emails a fresh statement → a Gmail API poll detects + downloads
+  it → the EXISTING `cas_import.py` parses it (unchanged) → dashboard exports
+  regenerate → Telegram reports success or exactly which step failed. Also
+  triggerable on-demand: CLI (`portfolio cas request|auto`), dashboard buttons
+  ("Request Fresh CAS", "Run Full Auto-Import" with toast on completion), or the
+  daily `PortfolioCasAuto` Scheduled Task (self-gates, so it's a no-op most days).
+- **Scope limit:** this is the CAMS+KFintech RTA-only statement — Groww *folio*
+  mutual funds only. Demat holdings and equities still need the monthly manual
+  NSDL/CDSL CAS; out of scope by design (see doc §1.1).
+- **New modules:** `cams_cas_request.py` (Playwright automation + schedule gate),
+  `cams_email_fetch.py` (Gmail search/download, with a real internalDate check to
+  avoid grabbing a stale same-day email instead of the fresh one — doc §8.5),
+  `tokens/gmail_oauth.py` (Desktop-app OAuth consent + refresh). Migration 0012
+  adds `cas_schedule` (interval_days default 2, enabled). `cas_import.py` gained a
+  second `extract_holdings()` code path (doc §8.3: this CAS document shape has no
+  `accounts` key at all, a genuinely different casparser model than the
+  depository-issued CAS M3 was built for — and it reports real cost basis for
+  demat-held MFs too, a data-quality upgrade over the old path).
+- **Also fixed in passing:** `.env` was never actually loaded by the app (env vars
+  depended on fragile OS-process inheritance) — real `python-dotenv` loading added
+  to `config.py`, which then surfaced a real path-resolution bug (a relative
+  `PORTFOLIO_DB_PATH` broke the Task Scheduler tasks for one day — doc §8.8, fixed).
+  `sonner`'s `<Toaster/>` had never been mounted anywhere (pre-existing gap,
+  unrelated) — fixed, `toast()` calls now actually render. The CAS Import screen
+  existed as a component but was never wired into dashboard navigation — fixed.
+- ✅ Live: real end-to-end runs completed successfully against production (real
+  PAN, real emails, real imports) multiple times 2026-08-24; ruff clean; full
+  `uv run pytest` suite green (201 passed / 2 skipped) with new tests for the
+  request module, the email-fetch module (incl. the stale-email regression), and
+  the folios-shape parsing; dashboard typecheck/lint/build clean.
+
 ### M9 — Deployment (2–3 evenings)
 - Migrate SQLite → Supabase (schema ports 1:1) — the shared spine: local legs and cloud
   legs write the SAME store (SQLite's single-writer rule forbids two hosts).

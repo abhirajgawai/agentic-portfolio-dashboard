@@ -17,14 +17,225 @@
 
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState, useRef } from 'react'
-import { FileText, Upload, Key, Loader2, AlertCircle, Check } from 'lucide-react'
+import { toast } from 'sonner'
+import { FileText, Upload, Key, Loader2, AlertCircle, Check, Mail, Clock, Zap } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
-import { importCas, type CasImportResponse } from '@/lib/data'
+import {
+  importCas,
+  requestCas,
+  runCasAuto,
+  useCasSchedule,
+  updateCasSchedule,
+  type CasImportResponse,
+} from '@/lib/data'
+
+const DASHBOARD_QUERY_KEYS = ['latest', 'history', 'xirr', 'alerts', 'performance'] as const
+
+function formatWhen(iso: string | null | undefined): string {
+  if (!iso) return '—'
+  try {
+    return new Date(iso).toLocaleString()
+  } catch {
+    return iso
+  }
+}
+
+function CasScheduleCard() {
+  const queryClient = useQueryClient()
+  const scheduleQuery = useCasSchedule()
+  const [intervalInput, setIntervalInput] = useState<string | null>(null)
+
+  const requestMutation = useMutation({
+    mutationFn: requestCas,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['cas-schedule'] })
+    },
+  })
+
+  const updateMutation = useMutation({
+    mutationFn: updateCasSchedule,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['cas-schedule'] })
+      setIntervalInput(null)
+    },
+  })
+
+  const autoMutation = useMutation({
+    mutationFn: runCasAuto,
+    onSuccess: (res) => {
+      toast.success('CAS auto-import complete', {
+        description: res.message || 'Requested, fetched, and imported successfully.',
+      })
+      queryClient.invalidateQueries({ queryKey: ['cas-schedule'] })
+      for (const key of DASHBOARD_QUERY_KEYS) {
+        queryClient.invalidateQueries({ queryKey: [key] })
+      }
+    },
+    onError: (err) => {
+      toast.error('CAS auto-import failed', {
+        description: err instanceof Error ? err.message : 'An unexpected error occurred',
+      })
+    },
+  })
+
+  const schedule = scheduleQuery.data
+  const displayedInterval = intervalInput ?? (schedule?.intervalDays?.toString() ?? '')
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Mail className="size-4" />
+          Request Fresh CAS
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <p className="text-xs text-muted-foreground">
+          Asks CAMS/KFintech directly to email a fresh statement covering your
+          Groww <em>folio</em> mutual funds — free, automated, no CAPTCHA. Not a
+          replacement for the full monthly demat CAS below; demat holdings and
+          equities aren't covered by this request. The PDF still arrives by
+          email — upload it in the card below once it lands.
+        </p>
+
+        <div className="flex flex-wrap gap-2">
+          <Button
+            variant="secondary"
+            onClick={() => requestMutation.mutate()}
+            disabled={requestMutation.isPending || autoMutation.isPending}
+          >
+            {requestMutation.isPending ? (
+              <>
+                <Loader2 className="size-4 mr-2 animate-spin" />
+                Requesting…
+              </>
+            ) : (
+              <>
+                <Mail className="size-4 mr-2" />
+                Request Fresh CAS
+              </>
+            )}
+          </Button>
+
+          <Button
+            variant="default"
+            onClick={() => autoMutation.mutate()}
+            disabled={autoMutation.isPending || requestMutation.isPending}
+          >
+            {autoMutation.isPending ? (
+              <>
+                <Loader2 className="size-4 mr-2 animate-spin" />
+                Running full auto-import… (up to ~10 min)
+              </>
+            ) : (
+              <>
+                <Zap className="size-4 mr-2" />
+                Run Full Auto-Import
+              </>
+            )}
+          </Button>
+        </div>
+
+        <p className="text-xs text-muted-foreground">
+          "Run Full Auto-Import" does everything unattended — request, wait for the
+          email, download, and import — no manual upload needed. Success/failure
+          shows as a notification when it finishes.
+        </p>
+
+        {requestMutation.isError && (
+          <Alert variant="destructive">
+            <AlertCircle className="size-4" />
+            <AlertTitle>Request failed</AlertTitle>
+            <AlertDescription>
+              {requestMutation.error instanceof Error
+                ? requestMutation.error.message
+                : 'An unexpected error occurred'}
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {requestMutation.isSuccess && (
+          <Alert>
+            <Check className="size-4 text-gain" />
+            <AlertTitle>Requested</AlertTitle>
+            <AlertDescription className="text-xs text-muted-foreground">
+              Check your email in ~2 minutes, then upload the PDF below.
+            </AlertDescription>
+          </Alert>
+        )}
+
+        <div className="border-t border-border/30 pt-4 space-y-3">
+          <div className="flex items-center gap-2 text-xs font-medium text-foreground">
+            <Clock className="size-3.5" />
+            Automatic schedule
+          </div>
+
+          {scheduleQuery.isLoading && (
+            <p className="text-xs text-muted-foreground">Loading schedule…</p>
+          )}
+
+          {schedule && (
+            <>
+              <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                <span>Last requested: {formatWhen(schedule.lastRequestedAt)}</span>
+                <span>Next due: {formatWhen(schedule.nextDueAt)}</span>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Label htmlFor="cas_interval" className="text-xs whitespace-nowrap">
+                  Every
+                </Label>
+                <Input
+                  id="cas_interval"
+                  type="number"
+                  min={1}
+                  value={displayedInterval}
+                  onChange={(e) => setIntervalInput(e.target.value)}
+                  className="h-8 w-16 text-xs"
+                  disabled={updateMutation.isPending}
+                />
+                <span className="text-xs text-muted-foreground">days</span>
+                {intervalInput !== null && intervalInput !== schedule.intervalDays?.toString() && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-8 text-xs"
+                    disabled={updateMutation.isPending || !intervalInput}
+                    onClick={() => updateMutation.mutate({ intervalDays: Number(intervalInput) })}
+                  >
+                    Save
+                  </Button>
+                )}
+                <Button
+                  size="sm"
+                  variant={schedule.enabled ? 'outline' : 'secondary'}
+                  className="h-8 text-xs ml-auto"
+                  disabled={updateMutation.isPending}
+                  onClick={() => updateMutation.mutate({ enabled: !schedule.enabled })}
+                >
+                  {schedule.enabled ? 'Enabled' : 'Disabled'}
+                </Button>
+              </div>
+            </>
+          )}
+
+          {updateMutation.isError && (
+            <p className="text-xs text-destructive">
+              {updateMutation.error instanceof Error
+                ? updateMutation.error.message
+                : 'Failed to update schedule'}
+            </p>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
 
 export function CasImportScreen() {
   const queryClient = useQueryClient()
@@ -72,8 +283,10 @@ export function CasImportScreen() {
       <div>
         <h1 className="text-2xl font-semibold">CAS Import</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Upload your monthly Consolidated Account Statement (CAS) PDF to import
-          Groww and Sharekhan holdings — stocks and mutual funds.
+          Import Groww and Sharekhan holdings — stocks and mutual funds — from
+          a Consolidated Account Statement (CAS) PDF. Request a fresh
+          Groww-folio statement on demand below, or upload the full monthly
+          statement you get by email.
         </p>
       </div>
 
@@ -83,9 +296,12 @@ export function CasImportScreen() {
         <AlertTitle>About the CAS</AlertTitle>
         <AlertDescription>
           <p className="text-xs text-muted-foreground mb-2">
-            The CAS (Consolidated Account Statement) is a free, SEBI-mandated monthly
+            The CAS (Consolidated Account Statement) is a free, SEBI-mandated
             report emailed to you by CDSL/NSDL (demat accounts) and CAMS/KFintech
-            (MF folios). It covers every demat + MF folio under your PAN.
+            (MF folios). A full demat + MF-folio statement still arrives monthly by
+            email; "Request Fresh CAS" below asks CAMS/KFintech directly for an
+            updated statement covering your Groww <em>folio</em> mutual funds
+            only (not demat holdings or equities), automatically, on a schedule.
           </p>
           <div className="flex flex-col sm:flex-row gap-4 text-xs">
             <div>
@@ -99,6 +315,8 @@ export function CasImportScreen() {
           </div>
         </AlertDescription>
       </Alert>
+
+      <CasScheduleCard />
 
       {/* Import Card */}
       <Card>

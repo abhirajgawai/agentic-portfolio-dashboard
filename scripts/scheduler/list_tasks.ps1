@@ -1,4 +1,4 @@
-# list_tasks.ps1 - M4: show the 10 registered Portfolio* tasks and verify that
+# list_tasks.ps1 - M4: show the registered Portfolio* tasks and verify that
 # each task's action (the run_*.cmd wrapper path) resolves to a real file.
 #
 # Primary output: schtasks /Query /FO TABLE /TN "Portfolio*" - TaskName,
@@ -6,18 +6,16 @@
 # Get-ScheduledTask and Test-Path'd, so a task pointing at a deleted/moved
 # wrapper shows [MISSING] instead of silently failing at fire time.
 #
-# Exit code 0 when all 8 tasks exist with resolvable wrappers, 1 otherwise.
+# Exit code 0 when all tasks exist with resolvable wrappers, 1 otherwise.
 #Requires -Version 5.1
 
 $TaskNames = @(
     'PortfolioServeZerodha',
-    'PortfolioSnapshotMorning',
     'PortfolioExportJsonMorning',
-    'PortfolioSnapshotEod',
     'PortfolioTrades',
     'PortfolioNavRefresh',
     'PortfolioFxRefresh',
-    'PortfolioSnapshotUs',
+    'PortfolioCasAuto',
     'PortfolioExportJsonUs',
     'PortfolioExportJson'
 )
@@ -26,7 +24,7 @@ Write-Host 'Portfolio* tasks (schtasks, one query per exact task name):'
 # NOTE: schtasks /Query /TN "Portfolio*" (wildcard) fails on this box with
 # "The system cannot find the file specified" even when the tasks exist - a
 # schtasks.exe quirk seen from both cmd.exe and PowerShell. Exact-name queries
-# are reliable, so we iterate the 10 known names instead.
+# are reliable, so we iterate the known names instead.
 foreach ($name in $TaskNames) {
     & schtasks.exe /Query /FO TABLE /TN $name
 }

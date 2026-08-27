@@ -67,3 +67,23 @@ export function useSparklineOption(
 ): EChartsOption | null {
   return buildSparklineOption(platform, historyByPlatform)
 }
+
+/** The trend's own % move (first non-zero day -> latest), for a direct label
+ *  next to the sparkline — a bare unlabeled line answers nothing on its own.
+ *  Same trim rule as buildSparklineOption (never divide against a leading
+ *  zero the platform hadn't started reporting yet). null when there's
+ *  nothing to compare (platform has no history, or only one point). */
+export function platformTrendPct(
+  platform: string,
+  historyByPlatform: Record<string, number[]>,
+): number | null {
+  const data = historyByPlatform[platform] ?? []
+  const start = data.findIndex((v) => v > 0)
+  if (start === -1) return null
+  let end = data.length - 1
+  while (end > start && (data[end] ?? 0) === 0) end -= 1
+  const first = data[start] ?? 0
+  const last = data[end] ?? 0
+  if (end <= start || first === 0) return null
+  return ((last - first) / first) * 100
+}

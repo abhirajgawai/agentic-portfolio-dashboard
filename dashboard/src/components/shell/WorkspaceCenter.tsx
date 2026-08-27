@@ -12,9 +12,9 @@ import { type WorkspaceId, type TransientDossier } from '@/lib/workspaces'
 import { JourneyWorkspace } from '@/components/workspaces/JourneyWorkspace'
 import { AllocationScreen } from '@/components/overview/AllocationScreen'
 import { PortfolioScreen } from '@/components/portfolio/PortfolioScreen'
-import { ReturnsScreen } from '@/components/returns/ReturnsScreen'
 import { AlertsScreen } from '@/components/alerts/AlertsScreen'
 import { PropertiesScreen } from '@/components/holdings/PropertiesScreen'
+import { GrowwSharekhanDataScreen } from '@/components/holdings/GrowwSharekhanDataScreen'
 
 interface WorkspaceCenterProps {
   workspace: WorkspaceId
@@ -59,9 +59,9 @@ export function WorkspaceCenter({ workspace, setTransientDossier }: WorkspaceCen
         )}
         {workspace === 'allocation' && <AllocationScreen />}
         {workspace === 'portfolio' && <PortfolioScreen setTransientDossier={setTransientDossier} />}
-        {workspace === 'returns' && <ReturnsScreen />}
         {workspace === 'alerts' && <AlertsScreen />}
         {workspace === 'properties' && <PropertiesScreen />}
+        {workspace === 'groww-sharekhan' && <GrowwSharekhanDataScreen />}
       </div>
     </div>
   )

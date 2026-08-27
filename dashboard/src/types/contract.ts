@@ -179,6 +179,53 @@ export const PropertyImportResponseSchema = z.object({
 })
 
 /* ------------------------------------------------------------------ */
+/* Manual equity holdings (Groww/Sharekhan — no API for either, so       */
+/* these are hand-entered; value-only, no cost basis)                   */
+/* ------------------------------------------------------------------ */
+
+export const ManualHoldingRequestSchema = z.object({
+  platform: z.enum(["groww", "sharekhan"]),
+  value: z.number(),
+})
+
+export const ManualHoldingResponseSchema = z.object({
+  ok: z.boolean(),
+  result: z.string().optional(),
+  export: z.string().optional(),
+  error: z.string().optional(),
+})
+
+/* ------------------------------------------------------------------ */
+/* Jobs status (M8.x) — latest run per tracked job                      */
+/* ------------------------------------------------------------------ */
+
+export const JobRunSchema = z.object({
+  platform: z.string(),
+  snapshot_date: z.string(),
+  status: z.string(),
+  started_at: z.string(),
+  rows: z.number().nullable(),
+  error: z.string().nullable(),
+}).nullable()
+
+export const JobsStatusSchema = z.object({
+  ok: z.boolean(),
+  jobs: z.object({
+    zerodha: JobRunSchema,
+    moomoo: JobRunSchema,
+    cams: JobRunSchema,
+    cams_fetch: JobRunSchema,
+  }).optional(),
+  error: z.string().optional(),
+})
+
+export const SnapshotTriggerResponseSchema = z.object({
+  ok: z.boolean(),
+  summary: z.record(z.string(), z.unknown()).optional(),
+  error: z.string().optional(),
+})
+
+/* ------------------------------------------------------------------ */
 /* performance.json (M8.6 daily performance tracker)                   */
 /* ------------------------------------------------------------------ */
 
@@ -273,6 +320,10 @@ export type Xirr = z.infer<typeof XirrSchema>
 export type XirrEntry = z.infer<typeof XirrEntrySchema>
 export type PropertyImportRequest = z.infer<typeof PropertyImportRequestSchema>
 export type PropertyImportResponse = z.infer<typeof PropertyImportResponseSchema>
+export type ManualHoldingRequest = z.infer<typeof ManualHoldingRequestSchema>
+export type ManualHoldingResponse = z.infer<typeof ManualHoldingResponseSchema>
+export type JobsStatus = z.infer<typeof JobsStatusSchema>
+export type SnapshotTriggerResponse = z.infer<typeof SnapshotTriggerResponseSchema>
 export type PropertyImprovement = z.infer<typeof PropertyImprovementSchema>
 export type Performance = z.infer<typeof PerformanceSchema>
 export type PerformanceDaily = z.infer<typeof PerformanceDailySchema>

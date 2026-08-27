@@ -19,6 +19,9 @@ import {
   ComposedChart,
   Area,
   Line,
+  Bar,
+  BarChart,
+  Cell,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -26,6 +29,7 @@ import {
   Brush,
   ReferenceLine,
   ResponsiveContainer,
+  LabelList,
 } from "recharts"
 
 import { ChartContainer, ChartConfig } from "@/components/ui/chart"
@@ -88,6 +92,71 @@ function chartMilestones(history: History): Milestone[] {
 }
 
 
+
+/* ------------------------------------------------------------------ */
+/* Day-over-day change strip (Option A — the literal "today vs past"    */
+/* comparison in numbers: a labeled diverging bar per day, not a slope  */
+/* the reader has to estimate off the line above). Capped to a small    */
+/* point count — beyond that the bars get too thin to label usefully,   */
+/* and the line chart above is already carrying the long-range trend.   */
+/* ------------------------------------------------------------------ */
+
+const DAY_CHANGE_STRIP_MAX_POINTS = 20
+
+function DayChangeStrip({
+  dates,
+  values,
+  masked,
+}: {
+  dates: readonly string[]
+  values: readonly number[]
+  masked: boolean
+}) {
+  const changes = useMemo(() => {
+    const out: { date: string; change: number }[] = []
+    for (let i = 1; i < values.length; i++) {
+      out.push({ date: dates[i] ?? "", change: (values[i] ?? 0) - (values[i - 1] ?? 0) })
+    }
+    return out
+  }, [dates, values])
+
+  if (changes.length === 0) return null
+
+  return (
+    <div className="mt-1">
+      <p className="mb-1 text-[10px] text-muted-foreground">Day-over-day change</p>
+      <div className="h-20 w-full">
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={changes} margin={{ top: 18, right: 4, left: 4, bottom: 0 }}>
+            <XAxis
+              dataKey="date"
+              tickFormatter={(d: string) => d.slice(5)}
+              tick={{ fill: "var(--muted-foreground)", fontSize: 10 }}
+              axisLine={false}
+              tickLine={false}
+              interval={0}
+            />
+            <Bar dataKey="change" radius={[3, 3, 3, 3]} maxBarSize={40}>
+              {!masked && (
+                <LabelList
+                  dataKey="change"
+                  position="top"
+                  fontSize={10}
+                  fontWeight={600}
+                  formatter={(v: number) => `${v >= 0 ? "+" : ""}${formatInrCompact(v)}`}
+                  fill="var(--foreground)"
+                />
+              )}
+              {changes.map((c, i) => (
+                <Cell key={i} fill={c.change >= 0 ? "var(--gain)" : "var(--loss)"} />
+              ))}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  )
+}
 
 /* ------------------------------------------------------------------ */
 /* Chart Config                                                        */
@@ -383,7 +452,21 @@ export function JourneyChart({ history }: { history: History }) {
                           ? "none"
                           : `line-draw ${ANIMATION_DURATION}ms var(--ease-out) forwards`,
                       }}
-                    />
+                    >
+                      {/* Option A: direct value labels instead of hover-only —
+                          only when there are few enough points to not collide. */}
+                      {!masked && sliced.values.length <= 12 && (
+                        <LabelList
+                          dataKey="value"
+                          position="top"
+                          offset={10}
+                          fontSize={11}
+                          fontWeight={600}
+                          fill="var(--foreground)"
+                          formatter={(v: number) => formatInrCompact(v)}
+                        />
+                      )}
+                    </Line>
                     {/* Milestone Pins */}
                     <MilestonePins
                       milestones={visibleMilestones}
@@ -397,6 +480,9 @@ export function JourneyChart({ history }: { history: History }) {
                 <Skeleton className="h-80 w-full" />
               )}
             </div>
+            {sliced.values.length >= 2 && sliced.values.length <= DAY_CHANGE_STRIP_MAX_POINTS && (
+              <DayChangeStrip dates={sliced.dates} values={sliced.values} masked={masked} />
+            )}
           </>
         )}
       </CardContent>

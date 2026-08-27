@@ -1,6 +1,5 @@
 /**
- * src/lib/segments.ts — Four portfolio segments: US · India · Groww-CAS ·
- * Consolidated.
+ * src/lib/segments.ts — Three portfolio segments: US · India · Consolidated.
  *
  * Pure, deterministic CLIENT-SIDE derivation from the immutable JSON contract
  * (latest.json + history.json + performance.json). The "Segments" view
@@ -9,13 +8,19 @@
  *
  * Why derive instead of asking the pipeline for a 4th file? The contract is
  * immutable (M8 rule) and the pipeline's own records already partition the same
- * holdings — geography (IN/US) and platform (groww, sharekhan). The four
- * segments are two overlapping partitions of one holdings array:
+ * holdings — geography (IN/US). The three segments are:
  *
  *   us           = geography 'US'                              (moomoo only)
  *   india        = geography 'IN'   (zerodha + groww + sharekhan + real_estate)
- *   cas          = platform groww + sharekhan                  (the CAS import)
  *   consolidated = every holding
+ *
+ * A fourth "Groww-CAS" segment (platform groww + sharekhan) existed here
+ * until the Portfolio screen's platform/asset-class breakdown (Zerodha /
+ * Groww MF / Groww Equities / Sharekhan / Real Estate / Moomoo — a finer
+ * partition, built with FilterProvider's generic filters, not this module)
+ * made it redundant: everything CAS covered is already inside India, at
+ * finer granularity. Removed rather than kept alongside to avoid two
+ * competing ways to slice the same India-side holdings.
  *
  * Honesty rules (determinism boundary):
  *   - The staleness reference instant is latest.asOf (the export's own "now"),
@@ -57,7 +62,7 @@ export { dayPnlLiveInr, fxToInr } from './fx'
 /* Segment definitions                                                 */
 /* ------------------------------------------------------------------ */
 
-export type SegmentId = 'us' | 'india' | 'cas' | 'consolidated'
+export type SegmentId = 'us' | 'india' | 'consolidated'
 
 export interface SegmentDefinition {
   id: SegmentId
@@ -66,15 +71,10 @@ export interface SegmentDefinition {
   matches: (h: Holding) => boolean
 }
 
-/** The four segments in canonical display order. */
+/** The three segments in canonical display order. */
 export const SEGMENT_DEFINITIONS: readonly SegmentDefinition[] = [
   { id: 'us', label: 'US', matches: (h) => h.geography === 'US' },
   { id: 'india', label: 'India', matches: (h) => h.geography === 'IN' },
-  {
-    id: 'cas',
-    label: 'Groww-CAS',
-    matches: (h) => h.platform === 'groww' || h.platform === 'sharekhan',
-  },
   { id: 'consolidated', label: 'Consolidated', matches: () => true },
 ]
 
@@ -170,31 +170,15 @@ export interface SegmentSummary {
   series: SegmentSeries
 }
 
-/** The four-segment partition invariant (pure check for the screen). */
+/** The three-segment partition invariant (pure check for the screen). */
 export interface SegmentReconciliation {
   /** Σ valueBase over the us + india holdings (independent of valueBase fields). */
   usPlusIndia: number
   /** Σ valueBase over ALL holdings. */
   consolidated: number
-  /** Σ valueBase over the RAW groww+sharekhan holdings in latest.holdings —
-   *  recomputed INDEPENDENTLY of the cas segment, so a broken segment
-   *  predicate or holdings filter can never self-validate. */
-  casSum: number
-  /** The cas segment's DERIVED valueBase — the field casSum is checked
-   *  against (a genuine invariant, not the same array reduced twice). */
-  casValueBase: number
-  /** RAW count of groww+sharekhan holdings in latest.holdings. */
-  casRawCount: number
-  /** The cas segment's derived holding count. */
-  casCount: number
   matches: {
     /** |usPlusIndia − consolidated| ≤ RECONCILIATION_TOLERANCE (INR). */
     usPlusIndiaEqConsolidated: boolean
-    /** |casSum − casValueBase| ≤ RECONCILIATION_TOLERANCE (INR). */
-    casEqGrowwSharekhan: boolean
-    /** casRawCount === casCount — the segment filtered the same rows the sum
-     *  check counted. */
-    casCountEqGrowwSharekhan: boolean
   }
 }
 
@@ -243,12 +227,11 @@ function expectAligned(
 }
 
 /** Base-currency series per segment. us/india use the pipeline's own
- *  byGeography sums (geography-complete by construction); cas sums the
- *  groww + sharekhan byPlatform arrays index-aligned (check:contract asserts
- *  alignment); consolidated uses portfolioValueBase directly. An EMPTY
- *  history (n === 0 — fresh install, no runs yet) returns an empty series,
- *  which the screen's EmptyState owns; anything truncated or missing throws
- *  (see expectAligned) — never a fabricated flat line. */
+ *  byGeography sums (geography-complete by construction); consolidated uses
+ *  portfolioValueBase directly. An EMPTY history (n === 0 — fresh install,
+ *  no runs yet) returns an empty series, which the screen's EmptyState owns;
+ *  anything truncated or missing throws (see expectAligned) — never a
+ *  fabricated flat line. */
 function segmentSeries(history: History, id: SegmentId): SegmentSeries {
   const dates = history.dates
   const n = dates.length
@@ -259,21 +242,7 @@ function segmentSeries(history: History, id: SegmentId): SegmentSeries {
   if (id === 'us') {
     return { dates, values: expectAligned('byGeography.US', history.byGeography['US'], n) }
   }
-  if (id === 'india') {
-    return { dates, values: expectAligned('byGeography.IN', history.byGeography['IN'], n) }
-  }
-  const groww = expectAligned('byPlatform.groww', history.byPlatform['groww'], n)
-  const sharekhan = expectAligned('byPlatform.sharekhan', history.byPlatform['sharekhan'], n)
-  const values = new Array<number>(n)
-  for (let i = 0; i < n; i++) {
-    const g = groww[i]
-    const s = sharekhan[i]
-    if (g === undefined || s === undefined) {
-      throw new Error(`history.byPlatform[${i}] has an undefined element — broken export`)
-    }
-    values[i] = g + s
-  }
-  return { dates, values }
+  return { dates, values: expectAligned('byGeography.IN', history.byGeography['IN'], n) }
 }
 
 /** Ledger day P&L per segment from the latest performance day's attribution.
@@ -281,10 +250,8 @@ function segmentSeries(history: History, id: SegmentId): SegmentSeries {
  *  (→ 0), never a fabricated number. */
 function segmentDayPnl(daily: PerformanceDaily, id: SegmentId): number {
   const geo = daily.attribution.byGeography
-  const platform = daily.attribution.byPlatform
   if (id === 'us') return geo['US'] ?? 0
   if (id === 'india') return geo['IN'] ?? 0
-  if (id === 'cas') return (platform['groww'] ?? 0) + (platform['sharekhan'] ?? 0)
   return daily.dayPnlBase
 }
 
@@ -423,22 +390,17 @@ export function buildSegments(
   }
 }
 
-/** The four-segment invariant as a pure check. Values are summed from the
+/** The three-segment invariant as a pure check. Values are summed from the
  *  segments' OWN holdings (not their valueBase fields) so a bug in the
- *  valueBase derivation is caught by the matches, not masked by it. The CAS
- *  identity is GENUINE: casSum is recomputed from the RAW latest.holdings
- *  (never from the cas segment's already-filtered rows), so a broken
- *  matches() predicate or holdings filter surfaces here instead of
- *  comparing an array with itself. */
+ *  valueBase derivation is caught by the matches, not masked by it. */
 export function assertReconciliation(
   segments: readonly SegmentSummary[],
-  latest: Latest,
+  _latest: Latest,
 ): SegmentReconciliation {
   const byId = new Map<SegmentId, SegmentSummary>()
   for (const s of segments) byId.set(s.id, s)
   const us = byId.get('us')
   const india = byId.get('india')
-  const cas = byId.get('cas')
   const consolidated = byId.get('consolidated')
 
   const sumValues = (hs: readonly Holding[] | undefined): number =>
@@ -447,30 +409,12 @@ export function assertReconciliation(
   const usPlusIndia = sumValues(us?.holdings) + sumValues(india?.holdings)
   const consolidatedValue = sumValues(consolidated?.holdings)
 
-  // INDEPENDENT recompute of the CAS legs straight from the contract
-  // holdings — the previous code reduced `cas?.holdings` twice, so the check
-  // could never fail even if the cas predicate were broken. Compare BOTH the
-  // sum and the count against the segment's derived fields.
-  const rawCasHoldings = latest.holdings.filter(
-    (h) => h.platform === 'groww' || h.platform === 'sharekhan',
-  )
-  const casSum = rawCasHoldings.reduce((sum, h) => sum + h.valueBase, 0)
-  const casValueBase = cas?.valueBase ?? 0
-  const casRawCount = rawCasHoldings.length
-  const casCount = cas?.holdings.length ?? 0
-
   return {
     usPlusIndia,
     consolidated: consolidatedValue,
-    casSum,
-    casValueBase,
-    casRawCount,
-    casCount,
     matches: {
       usPlusIndiaEqConsolidated:
         Math.abs(usPlusIndia - consolidatedValue) <= RECONCILIATION_TOLERANCE,
-      casEqGrowwSharekhan: Math.abs(casSum - casValueBase) <= RECONCILIATION_TOLERANCE,
-      casCountEqGrowwSharekhan: casRawCount === casCount,
     },
   }
 }

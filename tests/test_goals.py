@@ -29,7 +29,7 @@ def db(tmp_path):
 
 def test_migration_0011_creates_goal_table(tmp_path) -> None:
     path = tmp_path / "t.db"
-    assert migrate(path) == 11
+    assert migrate(path) == 12
     conn = connect(path)
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(goal)").fetchall()}
     # Pinned contract: the dashboard frontend reads exactly these columns.

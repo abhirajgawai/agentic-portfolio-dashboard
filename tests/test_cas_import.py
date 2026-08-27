@@ -16,11 +16,16 @@ from portfolio.db.migrate import migrate
 from portfolio.normalize.sectors import load_sectors
 
 FIXTURE = Path(__file__).parent.parent / "samples" / "cas" / "cas_june2026_scrubbed.json"
+FOLIOS_FIXTURE = Path(__file__).parent.parent / "samples" / "cas" / "cas_folios_summary_scrubbed.json"
 CAS_PDF = Path(__file__).parent.parent / "data" / "cas" / "CAS-June2026.pdf"
 
 
 def _fixture() -> dict:
     return json.loads(FIXTURE.read_text(encoding="utf-8"))
+
+
+def _folios_fixture() -> dict:
+    return json.loads(FOLIOS_FIXTURE.read_text(encoding="utf-8"))
 
 
 def test_statement_end_date():
@@ -103,6 +108,46 @@ def test_extract_holdings_curated_sectors():
     assert next(h for h in demat2 if h.ticker == "INF846K01K35").sector is None
     assert next(h for h in sharekhan2 if h.ticker == "BAJFINANCE").sector is None
     assert next(h for h in demat2 if h.ticker == "INF879O01027").sector == "Flexi Cap"
+
+
+def test_extract_holdings_dispatches_to_folios_shape():
+    """The CAMS+KFintech RTA-only mailback form (docs/CAMS_KFINTECH_CAS_PLAN.md)
+    returns a flat `folios` list with NO `accounts` key at all - a genuinely
+    different casparser model shape than the depository-issued CAS. Regression
+    for the 2026-08-24 bug: extract_holdings silently iterated an absent
+    `accounts` key and returned zero holdings despite real data being present.
+    """
+    groups, stats = extract_holdings(_folios_fixture())
+    assert stats["skipped_zerodha_equities"] == 0  # this document type has no equities section at all
+    assert stats["cost_known"] == 3  # three RAW scheme entries carry a real valuation.cost (pre-merge)
+    assert stats["cost_missing"] == 1  # one scheme's cost is null
+
+    assert set(groups) == {("groww", "folio")}
+    holdings = groups[("groww", "folio")]
+    # The fixture holds INF846K01K35 across TWO folios (910000000001 "Non
+    # Demat" + 910000000002 "Demat") - the exact real-world pattern found
+    # 2026-08-26 (a fund split across a lumpsum folio and a SIP folio). These
+    # must MERGE into one holding, not silently overwrite: 4 raw schemes ->
+    # 3 holdings.
+    assert len(holdings) == 3
+
+    priced = next(h for h in holdings if h.ticker == "INF846K01K35")
+    assert priced.quantity == pytest.approx(1914.344 + 257.826)
+    assert priced.cost_basis == pytest.approx(188700.0 + 30610.0)
+    assert priced.avg_price == pytest.approx((188700.0 + 30610.0) / (1914.344 + 257.826))
+    assert priced.current_price == pytest.approx(137.98)  # same NAV both folios - recompute is exact
+    assert priced.current_value == pytest.approx(264141.19 + 35574.83)
+    assert priced.asset_class == "mutual_fund"
+    assert priced.platform == "groww"
+
+    costless = next(h for h in holdings if h.ticker == "INF000K01ZZ9")
+    assert costless.cost_basis is None
+    assert costless.avg_price is None
+    assert costless.current_value == pytest.approx(1000.0)
+
+
+def test_statement_end_date_folios_shape():
+    assert statement_end_date(_folios_fixture()) == "2026-08-24"
 
 
 @pytest.fixture()

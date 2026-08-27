@@ -5,13 +5,39 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 # Project root = parent of src/
 ROOT_DIR = Path(__file__).resolve().parent.parent.parent
+
+# Loaded once, at import time, from a fixed path (ROOT_DIR/.env) rather than
+# python-dotenv's default cwd-search - a Task Scheduler wrapper or a shell
+# started from some other directory must still find the real file.
+# override=False (the default): a value already present in the process
+# environment (OS-level persisted var, Task Scheduler, an explicit export)
+# always wins over .env - .env is the fallback, not an override mechanism.
+# Fixes a real fragility found 2026-08-24: env vars persisted via
+# `[Environment]::SetEnvironmentVariable(...,'User')` only propagate to
+# genuinely fresh top-level processes, NOT to children spawned from an
+# already-running shell that predates the change (e.g. the bridge launched
+# from an agent's long-lived tool session) - a committed-pattern .env file
+# has no such inheritance timing issue, since every process reads it fresh
+# from disk at its own startup.
+load_dotenv(ROOT_DIR / ".env")
 
 DATA_DIR = ROOT_DIR / "data"
 SAMPLES_DIR = ROOT_DIR / "samples"
 HOLIDAYS_DIR = DATA_DIR / "holidays"
-DB_PATH = Path(os.getenv("PORTFOLIO_DB_PATH", str(DATA_DIR / "portfolio.db")))
+# A relative PORTFOLIO_DB_PATH (e.g. the "data/portfolio.db" documented in
+# .env.example) must resolve against ROOT_DIR, never the current process's
+# cwd - a Task Scheduler wrapper never `cd`s into the repo before invoking
+# python, so a bare Path(relative) resolved to whatever bogus cwd Task
+# Scheduler defaults to (regression found live 2026-08-24: "Access is
+# denied: 'data'" / "unable to open database file" once .env started being
+# loaded and actually set this var for the first time). ROOT_DIR / x is a
+# no-op when x is already absolute, so this is safe either way.
+_db_path_env = os.getenv("PORTFOLIO_DB_PATH")
+DB_PATH = (ROOT_DIR / _db_path_env) if _db_path_env else (DATA_DIR / "portfolio.db")
 
 
 class Settings:

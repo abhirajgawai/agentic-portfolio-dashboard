@@ -220,9 +220,9 @@ export function DayPnlBreakdownDialog({
 
             {/* Honest footnote (fixed text) + the excluded platforms list. */}
             <p className="text-[11px] leading-relaxed text-muted-foreground">
-              Day P&L covers live broker legs only (zerodha, moomoo). Groww-CAS and real-estate
-              holdings have no live day P&L — their value changes appear as revaluation events on
-              the Performance tab.
+              Day P&L covers live broker legs only (zerodha, moomoo). Groww, Sharekhan, and
+              real-estate holdings have no live day P&L — their value changes appear as
+              revaluation events on the Performance tab.
               {breakdown.noDayPnlPlatforms.length > 0 && (
                 <span className="mt-1 block">
                   No live day P&L: {breakdown.noDayPnlPlatforms.map(platformDisplayLabel).join(', ')}.

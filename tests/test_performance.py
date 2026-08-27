@@ -407,7 +407,7 @@ def test_naive_datetime_refused(db):
 def test_migration_fresh_db_reaches_v11(db):
     conn = connect(db)
     try:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 11
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 12
         assert conn.execute(
             "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='daily_performance'"
         ).fetchone()[0] == 1

@@ -38,6 +38,8 @@ prop_app = typer.Typer(help="Real estate property import (manual valuation entry
 app.add_typer(prop_app, name="property")
 goal_app = typer.Typer(help="Savings goals (dashboard journey goals, M8.9).")
 app.add_typer(goal_app, name="goal")
+manual_app = typer.Typer(help="Manual equity holdings (Groww/Sharekhan stocks - no API for either).")
+app.add_typer(manual_app, name="manual")
 
 logger = logging.getLogger("portfolio.cli")
 
@@ -67,6 +69,25 @@ def db_migrate() -> None:
     """Create/upgrade the SQLite schema (idempotent)."""
     version = migrate()
     typer.echo(f"schema at v{version}")
+
+
+@db_app.command("truncate")
+def db_truncate(
+    yes: Annotated[bool, typer.Option("--yes", help="skip the confirmation prompt")] = False,
+) -> None:
+    """Delete ALL portfolio data (holdings, history, prices, trades, runs) —
+    schema stays intact, and `goal` + `cas_schedule` are left untouched."""
+    if not yes and not typer.confirm(
+        "This permanently deletes all positions, snapshots, prices, trades, and "
+        "runs (goals and the CAS schedule are kept). Continue?", default=False,
+    ):
+        typer.echo("cancelled.")
+        raise typer.Exit(code=1)
+    from portfolio.db.reset import truncate_all
+
+    counts = truncate_all()
+    total = sum(counts.values())
+    typer.echo(f"truncated {total} rows across {len(counts)} tables.")
 
 
 @app.command("serve")
@@ -108,19 +129,69 @@ def serve(
 
 @app.command("auth")
 def auth(
-    platform: Annotated[str, typer.Option(help="moomoo (OpenD gateway setup)")] = "moomoo",
+    platform: Annotated[
+        str, typer.Option(help="moomoo (OpenD gateway setup) | cams (CAS request credentials) | gmail (CAS auto-fetch consent)")
+    ] = "moomoo",
 ) -> None:
-    """Set up the Moomoo leg: verify OpenD, store the trade password, test read.
+    """Set up a platform's credentials.
 
+    --platform moomoo: verify OpenD, store the trade password, test read.
     Moomoo account data comes from the OpenD gateway (the desktop app holds the
     login - see PLAN.md M2 spike findings). This command:
       1. checks OpenD is reachable on 127.0.0.1:11111,
       2. prompts for the trade password (unlock_trade) and stores it in the
          gitignored token store,
       3. runs one read-only end-to-end check (accounts + holdings count).
+
+    --platform cams: store PAN / registered email / CAS PDF password for the
+    automated CAMS+KFintech CAS request (docs/CAMS_KFINTECH_CAS_PLAN.md).
+    No live test is run here - unlike moomoo's read-only check, testing this
+    would submit a REAL request and send a real email. Verify separately with
+    `portfolio cas request`.
+
+    --platform gmail: one-time OAuth consent so `portfolio cas auto` can
+    detect and download the CAS email automatically (Part B,
+    docs/CAMS_KFINTECH_CAS_PLAN.md). Requires a Google Cloud OAuth "Desktop
+    app" client (client_id + client_secret) created ahead of time - this
+    command cannot create that client for you. IMPORTANT: Gmail has no
+    per-sender read scope, so the read-only access granted here covers your
+    ENTIRE mailbox, not just CAS emails - confirmed here before opening the
+    consent browser, not buried in docs only.
     """
+    if platform == "cams":
+        from portfolio.tokens import store
+
+        pan = typer.prompt("PAN")
+        email = typer.prompt("Registered email (CAMS/KFintech folios)")
+        password = typer.prompt("CAS PDF password", hide_input=True, confirmation_prompt=True)
+        if not (pan and email and password):
+            typer.echo("all three values are required - keeping the existing configuration.", err=True)
+            raise typer.Exit(code=1)
+        store.set_platform_value("cams", "pan", pan)
+        store.set_platform_value("cams", "email", email)
+        store.set_platform_value("cams", "cas_password", password)
+        typer.echo("cams credentials stored.")
+        return
+
+    if platform == "gmail":
+        from portfolio.tokens.gmail_oauth import run_consent_flow
+
+        typer.echo(
+            "Gmail read-only access covers your ENTIRE mailbox (Gmail has no "
+            "per-sender scope) - used only to find CAS emails from CAMS."
+        )
+        if not typer.confirm("Proceed with Gmail consent?", default=False):
+            typer.echo("cancelled.")
+            raise typer.Exit(code=1)
+        client_id = typer.prompt("Google OAuth client ID")
+        client_secret = typer.prompt("Google OAuth client secret", hide_input=True)
+        typer.echo("Opening browser for consent...")
+        run_consent_flow(client_id=client_id, client_secret=client_secret)
+        typer.echo("gmail credentials stored.")
+        return
+
     if platform != "moomoo":
-        raise typer.BadParameter("auth supports only --platform moomoo")
+        raise typer.BadParameter("auth supports --platform moomoo, cams, or gmail")
 
     import asyncio
 
@@ -232,6 +303,228 @@ def cas_import(
 
     result = import_cas(pdf, password=password, enrich_names=not no_enrich)
     typer.echo(f"cas import: {result}")
+
+
+@cas_app.command("request")
+def cas_request(
+    force: Annotated[bool, typer.Option(help="bypass the UI-configurable schedule gate")] = False,
+) -> None:
+    """Submit the CAMS+KFintech mailback CAS request (docs/CAMS_KFINTECH_CAS_PLAN.md).
+
+    Free, zero-vendor, no CAPTCHA (verified live 2026-08-24) - covers Groww
+    folio mutual funds across both CAMS and KFintech in one email. Gated by
+    the UI-configurable cas_schedule table (default every 2 days) unless
+    --force is passed. This only triggers the mailback; the PDF still arrives
+    by email and is uploaded by hand through the dashboard's CAS Import
+    screen (or `portfolio cas import`) until Part B (Gmail auto-fetch) lands.
+    Sends a Telegram notification on success (best-effort).
+    """
+    from portfolio.alerts.telegram import send_telegram
+    from portfolio.cams_cas_request import (
+        CamsRequestError,
+        is_cas_request_due,
+        request_cams_kfintech_cas,
+    )
+    from portfolio.config import Settings
+    from portfolio.db import connect, writer
+    from portfolio.tokens import store
+
+    settings = Settings()
+    at = _now_utc()
+    snapshot_date = at.date().isoformat()
+    db_path = _db_path()
+    conn = connect(db_path)
+    try:
+        if not force:
+            due, reason = is_cas_request_due(conn, at=at)
+            if not due:
+                writer.write_skipped(conn, "cams", snapshot_date, at.isoformat(), reason, is_eod=True)
+                typer.echo(f"cas request: skipped ({reason})")
+                return
+
+        cams_creds = store.platform_store("cams")
+        run_id = writer.write_run(
+            conn, "cams", snapshot_date, at.isoformat(), "running", is_eod=True,
+        )
+        try:
+            ref = request_cams_kfintech_cas(
+                pan=cams_creds.get("pan"),
+                email=cams_creds.get("email"),
+                password=cams_creds.get("cas_password"),
+            )
+        except CamsRequestError as exc:
+            writer.update_run(conn, run_id, "error", 0, error=str(exc))
+            typer.echo(f"cas request: FAILED - {exc}", err=True)
+            raise typer.Exit(code=1) from exc
+        writer.update_run(conn, run_id, "ok", 1)
+    finally:
+        conn.close()
+
+    send_telegram(
+        f"Fresh Groww CAS requested (CAMS+KFintech, ref {ref}) - check your "
+        "email in a few minutes, then upload it in the dashboard's CAS Import screen.",
+        settings=settings,
+    )
+    typer.echo(f"cas request: requested (ref {ref}) - check email shortly")
+
+
+@cas_app.command("auto")
+def cas_auto(
+    force: Annotated[bool, typer.Option(help="bypass the UI-configurable schedule gate")] = False,
+    fetch_timeout: Annotated[int, typer.Option(help="seconds to wait for the CAS email to arrive")] = 600,
+) -> None:
+    """Full unattended loop: request the CAMS+KFintech CAS, wait for the
+    email, download it, import it, and refresh the dashboard - zero manual
+    steps (Part B, docs/CAMS_KFINTECH_CAS_PLAN.md). Requires `portfolio auth
+    --platform cams` AND `portfolio auth --platform gmail` to already be set up.
+
+    Same schedule gate as `cas request` (default every 2 days). Each step is
+    audited separately in `runs` (platform='cams' for the request,
+    platform='cams_fetch' for the email pickup) so a failure partway through
+    is diagnosable - the request succeeding but the email never being found
+    is a different failure than the request itself failing, and each gets
+    its own Telegram message pointing at the manual fallback (the existing
+    CAS Import screen) rather than leaving the user guessing.
+    """
+    import subprocess
+    import tempfile
+    from pathlib import Path
+
+    from portfolio.alerts.telegram import send_telegram
+    from portfolio.cams_cas_request import (
+        CamsRequestError,
+        is_cas_request_due,
+        request_cams_kfintech_cas,
+    )
+    from portfolio.cams_email_fetch import CamsEmailNotFoundError, find_and_download_cas_pdf
+    from portfolio.cas_import import import_cas
+    from portfolio.config import Settings
+    from portfolio.db import connect, writer
+    from portfolio.tokens import store
+    from portfolio.tokens.gmail_oauth import GmailAuthError, build_gmail_service
+
+    settings = Settings()
+    at = _now_utc()
+    snapshot_date = at.date().isoformat()
+    db_path = _db_path()
+    conn = connect(db_path)
+    try:
+        if not force:
+            due, reason = is_cas_request_due(conn, at=at)
+            if not due:
+                writer.write_skipped(conn, "cams", snapshot_date, at.isoformat(), reason, is_eod=True)
+                typer.echo(f"cas auto: skipped ({reason})")
+                return
+
+        cams_creds = store.platform_store("cams")
+        request_run_id = writer.write_run(
+            conn, "cams", snapshot_date, at.isoformat(), "running", is_eod=True,
+        )
+        try:
+            ref = request_cams_kfintech_cas(
+                pan=cams_creds.get("pan"),
+                email=cams_creds.get("email"),
+                password=cams_creds.get("cas_password"),
+            )
+        except CamsRequestError as exc:
+            writer.update_run(conn, request_run_id, "error", 0, error=str(exc))
+            typer.echo(f"cas auto: request FAILED - {exc}", err=True)
+            raise typer.Exit(code=1) from exc
+        writer.update_run(conn, request_run_id, "ok", 1)
+        typer.echo(f"cas auto: requested (ref {ref}) - waiting for email...")
+
+        fetch_started = _now_utc()
+        fetch_run_id = writer.write_run(
+            conn, "cams_fetch", snapshot_date, fetch_started.isoformat(), "running", is_eod=True,
+        )
+        try:
+            gmail_service = build_gmail_service()
+            pdf_path = find_and_download_cas_pdf(
+                gmail_service=gmail_service,
+                since=at,
+                dest_dir=Path(tempfile.gettempdir()) / "portfolio_cas_auto",
+                timeout_seconds=fetch_timeout,
+            )
+        except (GmailAuthError, CamsEmailNotFoundError) as exc:
+            writer.update_run(conn, fetch_run_id, "error", 0, error=str(exc))
+            send_telegram(
+                f"CAS requested (ref {ref}) but the email pickup failed: {exc}. "
+                "Check your email and upload manually in the dashboard's CAS Import screen.",
+                settings=settings,
+            )
+            typer.echo(f"cas auto: email fetch FAILED - {exc}", err=True)
+            raise typer.Exit(code=1) from exc
+        writer.update_run(conn, fetch_run_id, "ok", 1)
+        typer.echo(f"cas auto: downloaded {pdf_path.name}")
+    finally:
+        conn.close()
+
+    cams_password = store.platform_store("cams").get("cas_password", "")
+    try:
+        import_result = import_cas(str(pdf_path), password=cams_password)
+    except Exception as exc:  # noqa: BLE001 - surface any parse/persist failure, don't leave the user guessing
+        send_telegram(
+            f"CAS downloaded (ref {ref}) but import failed: {exc}. "
+            "Upload manually in the dashboard's CAS Import screen.",
+            settings=settings,
+        )
+        typer.echo(f"cas auto: import FAILED - {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    typer.echo(f"cas auto: imported - {import_result}")
+
+    export_result = subprocess.run(
+        [sys.executable, "scripts/export_json.py"],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    if export_result.returncode != 0:
+        typer.echo(f"cas auto: export FAILED - {export_result.stderr[-500:]}", err=True)
+        raise typer.Exit(code=1)
+
+    send_telegram(f"CAS auto-imported (ref {ref}): {import_result}", settings=settings)
+    typer.echo("cas auto: done")
+
+
+cas_schedule_app = typer.Typer(help="CAS request schedule (docs/CAMS_KFINTECH_CAS_PLAN.md, Part C).")
+cas_app.add_typer(cas_schedule_app, name="schedule")
+
+
+@cas_schedule_app.command("show")
+def cas_schedule_show() -> None:
+    """Print the current CAS request schedule as one JSON line - the
+    contract the bridge's GET /api/cas/schedule parses (never touches the DB
+    directly, same rule as every other bridge<->CLI seam)."""
+    import json
+
+    from portfolio.cams_cas_request import schedule_status
+    from portfolio.db import connect
+
+    conn = connect(_db_path())
+    try:
+        typer.echo(json.dumps(schedule_status(conn, at=_now_utc())))
+    finally:
+        conn.close()
+
+
+@cas_schedule_app.command("set")
+def cas_schedule_set(
+    interval_days: Annotated[int | None, typer.Option("--interval-days", min=1)] = None,
+    enabled: Annotated[bool | None, typer.Option("--enabled/--disabled")] = None,
+) -> None:
+    """Update the schedule (only the provided fields change); prints the
+    resulting schedule as one JSON line, same contract as `schedule show`."""
+    import json
+
+    from portfolio.cams_cas_request import schedule_status, set_schedule
+    from portfolio.db import connect
+
+    conn = connect(_db_path())
+    try:
+        set_schedule(conn, interval_days=interval_days, enabled=enabled)
+        typer.echo(json.dumps(schedule_status(conn, at=_now_utc())))
+    finally:
+        conn.close()
 
 
 @nav_app.command("refresh")
@@ -418,6 +711,51 @@ def goal_delete(
         typer.echo(f"goal deleted: #{goal_id}")
     else:
         typer.echo(f"goal delete: FAILED - goal #{goal_id} not found", err=True)
+        raise typer.Exit(code=1)
+
+
+@manual_app.command("set")
+def manual_set(
+    platform: Annotated[str, typer.Option(help="groww | sharekhan")],
+    value: Annotated[float, typer.Option(help="current total equity value for this platform")],
+) -> None:
+    """Set (create or overwrite) the current total equity value for a
+    platform - value-only, no per-share breakdown (neither broker has an
+    API/MCP to itemize against). Re-running overwrites the value."""
+    from portfolio.manual_holdings import set_value
+
+    try:
+        result = set_value(platform, value)
+    except ValueError as exc:
+        typer.echo(f"manual set: FAILED - {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    typer.echo(f"manual set: {result}")
+
+
+@manual_app.command("list")
+def manual_list() -> None:
+    """Show the current manual value per platform (groww/sharekhan)."""
+    from portfolio.manual_holdings import get_values
+
+    values = get_values()
+    if not values:
+        typer.echo("no manual values set yet - set one: portfolio manual set --platform groww --value 500000")
+        return
+    for platform, v in sorted(values.items()):
+        typer.echo(f"{platform:10s} value={v['value']:,.2f} (as of {v['updatedAt']})")
+
+
+@manual_app.command("clear")
+def manual_clear(
+    platform: Annotated[str, typer.Option(help="groww | sharekhan")],
+) -> None:
+    """Remove a platform's manual value entirely (e.g. fully exited the broker)."""
+    from portfolio.manual_holdings import clear_value
+
+    if clear_value(platform):
+        typer.echo(f"manual clear: removed {platform}")
+    else:
+        typer.echo(f"manual clear: FAILED - {platform} has no manual value set", err=True)
         raise typer.Exit(code=1)
 
 

@@ -77,9 +77,13 @@ def test_series_mixed_frequency_dates_are_honest(db) -> None:
     # Date B carries zerodha 100 and groww 200; it does not treat their
     # missing snapshots as zero.
     assert series["byGeography"] == {"IN": [300.0, 350.0], "US": [300.0, 250.0]}
+    # Platform-complete by construction (M8.x fresh-start reset regression):
+    # real_estate is in the platform registry but has no rows in this seed,
+    # so it appears zero-filled rather than vanishing from the dict entirely.
     assert series["byPlatform"] == {
         "groww": [200.0, 200.0],
         "moomoo": [300.0, 250.0],
+        "real_estate": [0.0, 0.0],
         "sharekhan": [0.0, 50.0],
         "zerodha": [100.0, 100.0],
     }
@@ -134,6 +138,10 @@ def test_series_carries_complete_multi_instrument_platform_snapshot(db) -> None:
 
     assert series["dates"] == ["2026-08-06", "2026-08-07"]
     assert series["byPlatform"]["zerodha"] == [350.0, 350.0]
+    # Platform-complete by construction: groww/sharekhan/real_estate are in
+    # the registry but have no rows in this seed - zero-filled, not absent.
+    for zero_platform in ("groww", "sharekhan", "real_estate"):
+        assert series["byPlatform"][zero_platform] == [0.0, 0.0]
     assert series["portfolioValueBase"] == [350.0, 425.0]
     assert series["byGeography"] == {"IN": [350.0, 350.0], "US": [0.0, 75.0]}
     for i in range(len(series["dates"])):

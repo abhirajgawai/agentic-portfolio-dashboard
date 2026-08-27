@@ -23,7 +23,7 @@ def _tables(conn) -> set[str]:
 
 def test_fresh_migrate_creates_v11_schema(tmp_path) -> None:
     path = tmp_path / "t.db"
-    assert migrate(path) == 11
+    assert migrate(path) == 12
     conn = connect(path)
     assert {
         "account", "instrument", "fx_rate", "price_history",
@@ -31,6 +31,7 @@ def test_fresh_migrate_creates_v11_schema(tmp_path) -> None:
         "alert_events",  # v6 (M6): rule-alert dedupe backbone
         "daily_performance",  # v10 (M8.6): materialized daily performance scopes
         "goal",  # v11 (M8.9): savings goals out of localStorage
+        "cas_schedule",  # v12: CAMS+KFintech CAS request schedule
     } <= _tables(conn)
     assert {"snapshots", "fx_rates", "trades"} & _tables(conn) == set()
     # v3 adds cost basis in base currency; v4 adds full-fidelity holding detail;
@@ -45,8 +46,8 @@ def test_fresh_migrate_creates_v11_schema(tmp_path) -> None:
 
 def test_migrate_is_idempotent(tmp_path) -> None:
     path = tmp_path / "t.db"
-    assert migrate(path) == 11
-    assert migrate(path) == 11
+    assert migrate(path) == 12
+    assert migrate(path) == 12
 
 
 def test_v1_to_v2_backfills_data(tmp_path) -> None:
@@ -63,7 +64,7 @@ def test_v1_to_v2_backfills_data(tmp_path) -> None:
     raw.commit()
     raw.close()
 
-    assert migrate(path) == 11
+    assert migrate(path) == 12
 
     conn = connect(path)
     assert conn.execute("SELECT COUNT(*) FROM position").fetchone()[0] == 1

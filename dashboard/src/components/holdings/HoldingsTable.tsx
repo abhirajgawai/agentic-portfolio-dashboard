@@ -27,7 +27,7 @@ import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { EmptyState } from '@/components/layout/states'
 import { EChart } from '@/components/charts/EChart'
-import { buildSparklineOption } from '@/lib/sparkline'
+import { buildSparklineOption, platformTrendPct } from '@/lib/sparkline'
 import { useHistory } from '@/lib/data'
 import { formatMoney, formatPct, formatPrice, formatQty, MASK_TEXT, platformLabel } from '@/lib/format'
 import { usePrivacy } from '@/lib/privacy'
@@ -101,6 +101,20 @@ const HoldingsTableInner = memo(function HoldingsTableInner({
     const platforms = new Set(holdings.map((h) => h.platform))
     for (const platform of platforms) {
       map.set(platform, buildSparklineOption(platform, byPlatform))
+    }
+    return map
+  }, [effectiveShowSparkline, history.data])
+
+  // Direct label beside each sparkline (Option A: a bare unlabeled line
+  // answers nothing on its own) — the platform trend's own % move, not a
+  // per-holding number (the contract has no per-holding history).
+  const sparklineDeltas = useMemo(() => {
+    const map = new Map<string, number | null>()
+    if (!effectiveShowSparkline) return map
+    const byPlatform = history.data?.byPlatform ?? {}
+    const platforms = new Set(holdings.map((h) => h.platform))
+    for (const platform of platforms) {
+      map.set(platform, platformTrendPct(platform, byPlatform))
     }
     return map
   }, [effectiveShowSparkline, history.data])
@@ -192,15 +206,34 @@ const HoldingsTableInner = memo(function HoldingsTableInner({
         sortDescFirst: true,
       })
 
-      // sparklineCol accesses sparklineOptions via CLOSURE (not dep) so the
-      // columns array stays stable when sparklineOptions Map identity changes.
+      // sparklineCol accesses sparklineOptions/sparklineDeltas via CLOSURE
+      // (not deps) so the columns array stays stable when those Maps' identity
+      // changes.
       const sparklineCol = columnHelper.display({
         id: 'sparkline',
-        header: 'Trend',
+        header: 'Platform trend',
         enableSorting: false,
         cell: (info) => {
-          const option = sparklineOptions.get(info.row.original.platform)
-          return option ? <EChart option={option} height={24} /> : <span className="text-muted-foreground">—</span>
+          const platform = info.row.original.platform
+          const option = sparklineOptions.get(platform)
+          if (!option) return <span className="text-muted-foreground">—</span>
+          const delta = sparklineDeltas.get(platform) ?? null
+          return (
+            <div className="flex items-center gap-1.5">
+              <EChart option={option} height={24} />
+              {delta !== null && (
+                <span
+                  className={cn(
+                    'shrink-0 text-[10px] font-medium tabular-nums',
+                    delta > 0 ? 'text-gain' : delta < 0 ? 'text-loss' : 'text-muted-foreground',
+                  )}
+                >
+                  {delta > 0 ? '+' : ''}
+                  {delta.toFixed(1)}%
+                </span>
+              )}
+            </div>
+          )
         },
       })
 

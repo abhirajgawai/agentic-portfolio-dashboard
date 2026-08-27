@@ -1,5 +1,6 @@
 /**
- * src/lib/workspaces.ts — Workspace registry: journey | allocation | portfolio | returns | alerts | properties
+ * src/lib/workspaces.ts — Workspace registry: journey | allocation | portfolio |
+ * alerts | properties | groww-sharekhan
  * + dossier:<ticker> transient state. useWorkspace hook; command-bar items built
  * from this registry.
  */
@@ -11,9 +12,9 @@ export type WorkspaceId =
   | 'journey'
   | 'allocation'
   | 'portfolio'
-  | 'returns'
   | 'alerts'
   | 'properties'
+  | 'groww-sharekhan'
 
 export type TransientDossier = {
   ticker: string | null
@@ -32,9 +33,9 @@ export const WORKSPACES: WorkspaceDescriptor[] = [
   { id: 'journey', label: 'Journey' },
   { id: 'allocation', label: 'Allocation' },
   { id: 'portfolio', label: 'Portfolio' },
-  { id: 'returns', label: 'Returns' },
   { id: 'alerts', label: 'Alerts' },
   { id: 'properties', label: 'Properties' },
+  { id: 'groww-sharekhan', label: 'Groww/Sharekhan Data' },
 ]
 
 export function useWorkspace(

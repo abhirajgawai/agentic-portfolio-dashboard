@@ -7,15 +7,29 @@
 # what timezone the host is in. The host is currently UTC+8 (Singapore), so the
 # same instants read 12:05 / 12:15 / ... in machine-local terms):
 #   09:35 IST  PortfolioServeZerodha       daemon up, waits for the manual 2FA login
-#   09:45 IST  PortfolioSnapshotMorning    morning live snapshot (IN leg; US leg self-gates)
 #   09:50 IST  PortfolioExportJsonMorning  dashboard JSON export (the morning "refresh")
-#   15:45 IST  PortfolioSnapshotEod        EOD snapshot
 #   15:50 IST  PortfolioTrades             daily trade capture for XIRR
 #   16:15 IST  PortfolioExportJson         dashboard JSON export (EOD) — 30 min buffer after EOD
 #   21:30 IST  PortfolioNavRefresh         AMFI NAV refresh (keyless)
 #   21:35 IST  PortfolioFxRefresh          FX refresh (keyless)
-#   22:30 IST  PortfolioSnapshotUs         mid-US-session LIVE snapshot (moomoo only; ~13:00 ET)
+#   21:40 IST  PortfolioCasAuto            full unattended CAS loop (request + Gmail auto-fetch +
+#                                          import + export) - fires daily but self-gates on the
+#                                          cas_schedule table (default every 2 days,
+#                                          docs/CAMS_KFINTECH_CAS_PLAN.md); Groww folio-MF leg only
 #   22:35 IST  PortfolioExportJsonUs       dashboard JSON export (US refresh - trips the reload banner)
+#
+# The zerodha/moomoo LIVE snapshot tasks (PortfolioSnapshotMorning,
+# PortfolioSnapshotEod, PortfolioSnapshotUs) were removed 2026-08-27: the
+# laptop that runs the daemons is only on when the user is actively working,
+# so fixed-time triggers routinely fired against an offline machine or a
+# daemon needing a manual 2FA login nobody was there to complete, leaving
+# stale "error"/"skipped" rows the Journey screen displayed as if the
+# daemons themselves were broken (they weren't). Snapshots are now
+# on-demand only, via the Journey screen's per-platform "take snapshot now"
+# button (LiveJobsRow -> POST /api/snapshot/{platform}) - triggered when the
+# user is actually there to handle 2FA if needed. The Journey screen's
+# StalenessBanner nudges when a platform hasn't been refreshed recently,
+# replacing the scheduled-task safety net with an in-app one.
 #
 # Design notes:
 #  - Tasks run as the current user (interactive, always-on desktop). No /RU or
@@ -49,14 +63,12 @@ $Today = (Get-Date).ToString('yyyy-MM-dd')
 # name -> @(start time HH:MM IST, wrapper file name)
 $Tasks = [ordered]@{
     'PortfolioServeZerodha'       = @('09:35', 'run_serve.cmd')
-    'PortfolioSnapshotMorning'    = @('09:45', 'run_snapshot_morning.cmd')
     'PortfolioExportJsonMorning'  = @('09:50', 'run_export.cmd')
-    'PortfolioSnapshotEod'        = @('15:45', 'run_snapshot_eod.cmd')
     'PortfolioTrades'             = @('15:50', 'run_trades.cmd')
     'PortfolioExportJson'         = @('16:15', 'run_export.cmd')
     'PortfolioNavRefresh'         = @('21:30', 'run_nav.cmd')
     'PortfolioFxRefresh'          = @('21:35', 'run_fx.cmd')
-    'PortfolioSnapshotUs'         = @('22:30', 'run_us_snapshot.cmd')
+    'PortfolioCasAuto'            = @('21:40', 'run_cas_auto.cmd')
     'PortfolioExportJsonUs'       = @('22:35', 'run_export.cmd')
 }
 

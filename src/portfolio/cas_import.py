@@ -39,6 +39,7 @@ from __future__ import annotations
 import logging
 import re
 from collections.abc import Mapping
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -86,6 +87,49 @@ _AMC_ONLY = re.compile(r"^[A-Z0-9 .&()'\-]{2,40}\s+MUTUAL FUND$")
 
 def _is_amc_only(name: str | None) -> bool:
     return bool(name and _AMC_ONLY.match(name.strip().upper()))
+
+
+def _merge_duplicate_tickers(holdings: list[Holding]) -> list[Holding]:
+    """Merge holdings that share a ticker within one (platform, account_ref)
+    batch.
+
+    Real-world trigger (found 2026-08-26 against a live statement): the same
+    mutual fund scheme can be held under TWO folio numbers (e.g. a lumpsum
+    folio and a separate SIP folio) - the flat CAMS+KFintech `folios` shape
+    (and, defensively, the depository `accounts` shape) carries no folio-level
+    identity once flattened to one (platform, account_ref) batch, so both
+    entries key to the SAME ticker. persist()'s per-instrument upsert only
+    keeps the LAST holding written for a repeated (platform, ticker) - a
+    silent overwrite, not a crash, so it went undetected until a user
+    reported a statement total that didn't match the dashboard (a 27.75L
+    statement showed as 9.37L - one fund alone lost 2,64,141.19 of
+    2,99,716.02 this way).
+
+    Quantity/cost/value sum across the duplicates; price is recomputed from
+    the combined total. NAV is the same for a given ISIN on a given
+    statement date regardless of which folio holds it, so this recomputation
+    is exact, not an approximation.
+    """
+    merged: dict[str, Holding] = {}
+    for h in holdings:
+        existing = merged.get(h.ticker)
+        if existing is None:
+            merged[h.ticker] = h
+            continue
+        qty = existing.quantity + h.quantity
+        cost = None
+        if existing.cost_basis is not None or h.cost_basis is not None:
+            cost = (existing.cost_basis or 0.0) + (h.cost_basis or 0.0)
+        value = existing.current_value + h.current_value
+        merged[h.ticker] = replace(
+            existing,
+            quantity=qty,
+            avg_price=(cost / qty) if cost is not None and qty else None,
+            current_price=(value / qty) if qty else existing.current_price,
+            cost_basis=cost,
+            current_value=value,
+        )
+    return list(merged.values())
 
 
 def read_cas(pdf_path: str | Path, password: str = "") -> dict[str, Any]:
@@ -140,9 +184,22 @@ def extract_holdings(
     Returns (groups, stats) where stats reports how many rows carry a cost
     basis (returns computable) vs value-only, and how many zerodha equities
     were skipped as live-captured.
+
+    Dispatches on document shape: a depository-issued CAS (NSDL/CDSL,
+    file_type in {CDSL, NSDL, CAMSKFINTECH combined}) has a top-level
+    `accounts` list; a CAMS/KFintech RTA-only statement (e.g. the "CAS -
+    CAMS+KFintech" mailback form, docs/CAMS_KFINTECH_CAS_PLAN.md - verified
+    2026-08-24: cas_type=SUMMARY, file_type=CAMS) has NO `accounts` key at
+    all, only a flat `folios` list - casparser returns a genuinely different
+    model shape depending on what the source PDF actually is. Discovered when
+    the automated CAMS+KFintech request's PDF imported with zero holdings
+    despite casparser parsing 14 real folios correctly - extract_holdings
+    was silently iterating an absent `accounts` key.
     """
     nav_names = nav_names or {}
     sectors = sectors or {}
+    if not raw.get("accounts") and raw.get("folios"):
+        return _extract_folios_summary(raw, nav_names=nav_names, sectors=sectors)
     groups: dict[tuple[str, str], list[Holding]] = {}
     stats: dict[str, Any] = {"cost_known": 0, "cost_missing": 0, "skipped_zerodha_equities": 0, "by_platform": {}}
 
@@ -172,7 +229,11 @@ def extract_holdings(
                     stats["cost_known"] += 1
                 else:
                     stats["cost_missing"] += 1
-    return {k: v for k, v in groups.items() if v}, stats
+    merged_groups = {k: _merge_duplicate_tickers(v) for k, v in groups.items() if v}
+    stats["by_platform"] = {}
+    for (platform, _ref), merged_holdings in merged_groups.items():
+        stats["by_platform"][platform] = stats["by_platform"].get(platform, 0) + len(merged_holdings)
+    return merged_groups, stats
 
 
 def _equity_holding(
@@ -240,6 +301,80 @@ def _mf_holding(
         sector=sector,  # fund category (Flexi Cap, Gold, ...) - None when unmapped
         asset_class=asset_class,
     )
+
+
+def _folio_mf_holding(
+    scheme: Mapping[str, Any],
+    nav_names: Mapping[str, str],
+    sectors: Mapping[str, tuple[str | None, str | None]],
+) -> Holding | None:
+    """One scheme from a CAMS/KFintech RTA-only statement's flat `folios`
+    list (see extract_holdings' docstring for the two-shape split). Unlike
+    the depository-shaped demat MF rows, these carry a real cost basis for
+    BOTH demat-held and non-demat (SOA) mutual funds - a genuine data-quality
+    improvement over the old depository CAS's demat-MF value-only rows,
+    confirmed against the real 2026-08-24 statement (every scheme had a
+    populated valuation.cost)."""
+    isin = scheme.get("isin")
+    units = _num(scheme.get("close"))
+    valuation = scheme.get("valuation") or {}
+    nav = _num(valuation.get("nav"))
+    value = _num(valuation.get("value"))
+    cost = _num(valuation.get("cost"))
+    if not isin or units is None or nav is None:
+        logger.warning("cas folio scheme without isin/units/nav skipped: %s", isin)
+        return None
+    pdf_name = scheme.get("scheme")
+    amfi_name = nav_names.get(str(isin))
+    name = _clean_name(amfi_name or pdf_name)
+    sector, csv_asset = sectors.get(str(isin), (None, None))
+    asset_class = csv_asset or ("etf" if name and "ETF" in name.upper() else "mutual_fund")
+    return Holding(
+        platform=FOLIO_PLATFORM,
+        geography="IN",
+        ticker=str(isin),
+        name=name,
+        quantity=units,
+        avg_price=(cost / units) if cost is not None and units else None,
+        current_price=nav,
+        cost_basis=cost,
+        current_value=value if value is not None else nav * units,
+        currency="INR",
+        sector=sector,
+        asset_class=asset_class,
+    )
+
+
+def _extract_folios_summary(
+    raw: Mapping[str, Any],
+    *,
+    nav_names: Mapping[str, str],
+    sectors: Mapping[str, tuple[str | None, str | None]],
+) -> tuple[dict[tuple[str, str], list[Holding]], dict[str, Any]]:
+    """extract_holdings' branch for the flat `folios` document shape (no
+    `accounts`, no dp_id - this document type carries no demat/equity data at
+    all, every entry is a mutual fund). Every folio is attributed to the
+    Groww distributor account, same convention as the depository-shaped
+    "Mutual Fund Folios" pseudo-account (FOLIO_PLATFORM/FOLIO_ACCOUNT_REF)."""
+    groups: dict[tuple[str, str], list[Holding]] = {}
+    stats: dict[str, Any] = {"cost_known": 0, "cost_missing": 0, "skipped_zerodha_equities": 0, "by_platform": {}}
+    key = (FOLIO_PLATFORM, FOLIO_ACCOUNT_REF)
+    groups.setdefault(key, [])
+    stats["by_platform"][FOLIO_PLATFORM] = 0
+    for folio in raw.get("folios") or []:
+        for scheme in folio.get("schemes") or []:
+            holding = _folio_mf_holding(scheme, nav_names, sectors)
+            if holding is None:
+                continue
+            groups[key].append(holding)
+            stats["by_platform"][FOLIO_PLATFORM] += 1
+            if holding.cost_basis is not None:
+                stats["cost_known"] += 1
+            else:
+                stats["cost_missing"] += 1
+    merged_groups = {k: _merge_duplicate_tickers(v) for k, v in groups.items() if v}
+    stats["by_platform"] = {FOLIO_PLATFORM: len(merged_groups.get(key, []))}
+    return merged_groups, stats
 
 
 def import_cas(

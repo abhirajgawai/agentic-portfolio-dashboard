@@ -40,6 +40,10 @@ export function trendAreaOption(opts: {
   /** When true, currency labels (tooltip + y-axis) render as MASK_TEXT.
    *  The curve itself stays visible — only the numbers are hidden. */
   masked?: boolean
+  /** Direct value labels on the FIRST series (Option A: read the number off
+   *  the chart, not off a hover tooltip). Caller gates this on point count —
+   *  labels collide once there are more than a handful of points. */
+  showLabels?: boolean
 }): EChartsOption {
   const fmt = opts.formatter ?? ((v: number) => String(v))
   const valueFmt = (v: number) => (opts.masked ? MASK_TEXT : fmt(v))
@@ -80,17 +84,90 @@ export function trendAreaOption(opts: {
       icon: 'circle',
       textStyle: { color: CHART_TEXT, fontSize: 11 },
     },
-    series: opts.series.map((s) => ({
+    series: opts.series.map((s, i) => ({
       name: s.name,
       type: 'line' as const,
       data: s.data,
       smooth: 0.3,
       symbol: 'circle',
       symbolSize: 5,
-      showSymbol: false,
+      showSymbol: opts.showLabels && i === 0,
       lineStyle: { width: 2 },
       areaStyle: s.area ? { opacity: 0.18 } : undefined,
+      // Labels on the first (Portfolio) series only — avoids collisions
+      // when geography lines are drawn alongside it.
+      label:
+        opts.showLabels && i === 0 && !opts.masked
+          ? {
+              show: true,
+              position: 'top' as const,
+              fontSize: 11,
+              fontWeight: 600 as const,
+              color: CHART_TEXT,
+              formatter: (p: { value: number }) => fmt(p.value),
+            }
+          : { show: false },
     })),
+  }
+}
+
+/**
+ * Day-over-day change strip (Option A) — one labeled, sign-colored bar per
+ * day. The literal "today vs past" comparison in numbers, paired below
+ * trendAreaOption's line so the trend and the day-by-day moves that built it
+ * are both readable without hovering. Caller should cap point count (bars
+ * get unreadable past ~20-30 days) — this builder doesn't gate on it.
+ */
+export function dayChangeBarOption(opts: {
+  dates: string[]
+  changes: number[]
+  formatter?: (value: number) => string
+  masked?: boolean
+}): EChartsOption {
+  const fmt = opts.formatter ?? ((v: number) => String(v))
+  const valueFmt = (v: number) => (opts.masked ? MASK_TEXT : fmt(v))
+  return {
+    backgroundColor: 'transparent',
+    textStyle: baseTextStyle,
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'shadow' },
+      backgroundColor: 'rgba(20,20,24,0.92)',
+      borderColor: 'rgba(255,255,255,0.1)',
+      textStyle: { color: '#e8e8ea' },
+      valueFormatter: (v: unknown) => valueFmt(typeof v === 'number' ? v : 0),
+    },
+    grid: { left: 8, right: 8, top: 24, bottom: 4, containLabel: true },
+    xAxis: {
+      type: 'category',
+      boundaryGap: true,
+      data: opts.dates.map((d) => d.slice(5)),
+      axisLine: { lineStyle: { color: AXIS_LINE } },
+      axisLabel: { color: CHART_TEXT, fontSize: 10 },
+      axisTick: { show: false },
+    },
+    yAxis: { type: 'value', show: false },
+    series: [
+      {
+        name: 'Day change',
+        type: 'bar',
+        data: opts.changes.map((v) => ({
+          value: v,
+          itemStyle: { color: v >= 0 ? GAIN : LOSS, borderRadius: 3 },
+        })),
+        barMaxWidth: 40,
+        label: opts.masked
+          ? { show: false }
+          : {
+              show: true,
+              position: 'top' as const,
+              fontSize: 10,
+              fontWeight: 600 as const,
+              color: CHART_TEXT,
+              formatter: (p: { value: number }) => `${p.value >= 0 ? '+' : ''}${fmt(p.value)}`,
+            },
+      },
+    ],
   }
 }
 

@@ -12,9 +12,17 @@ dashboard history is DERIVED at export time from `position_snapshot` instead:
 This is honest by construction with mixed-frequency legs: on a date where only
 Zerodha ran, the other platforms retain their most recent known value. A
 missing row means that a leg did not run, not that its holdings disappeared.
-This assumes each platform snapshot date is a complete replacement snapshot for
-that platform: all instruments held by the platform on that date are present,
-so an absent platform date means its complete prior aggregate should carry.
+This assumes each ACCOUNT's snapshot date is a complete replacement snapshot
+for that account: all instruments held by the account on that date are
+present, so an absent account date means its complete prior aggregate should
+carry. Carry-forward is per (platform, account_ref), not per platform alone -
+a platform can have multiple independently-scheduled accounts (e.g. groww's
+automated CAS folio import vs. a hand-entered manual equities total), and
+treating the platform as one unit would let one account's snapshot day
+silently replace the WHOLE platform's total, discarding every other account
+under it (real bug found 2026-08-26: a manual Groww equities update on a day
+the CAS folio import didn't also run dropped 27.75L from that day's total -
+verified live, ledger showed 75L against a real 1.03Cr net worth).
 
 Deterministic: dates ascending, platforms/geographies sorted, values in the
 global base (market_value_base is frozen at each run's fx rate).
@@ -23,6 +31,8 @@ global base (market_value_base is frozen at each run's fx rate).
 from __future__ import annotations
 
 from typing import Any
+
+from portfolio.config import PLATFORMS
 
 
 def portfolio_series(conn: Any, base: str) -> dict[str, Any]:
@@ -37,12 +47,13 @@ def portfolio_series(conn: Any, base: str) -> dict[str, Any]:
     """
     rows = conn.execute(
         """
-        SELECT ps.snapshot_date AS d, i.platform AS p, i.geography AS g,
-               SUM(ps.market_value_base) AS v
+        SELECT ps.snapshot_date AS d, a.platform AS p, i.geography AS g,
+               a.account_ref AS ref, SUM(ps.market_value_base) AS v
         FROM position_snapshot ps
+        JOIN account a ON a.id = ps.account_id
         JOIN instrument i ON i.id = ps.instrument_id
-        GROUP BY ps.snapshot_date, i.platform, i.geography
-        ORDER BY ps.snapshot_date, i.platform, i.geography
+        GROUP BY ps.snapshot_date, a.platform, i.geography, a.account_ref
+        ORDER BY ps.snapshot_date, a.platform, a.account_ref
         """
     ).fetchall()
 
@@ -55,22 +66,44 @@ def portfolio_series(conn: Any, base: str) -> dict[str, Any]:
         }
 
     dates = sorted({r["d"] for r in rows})
-    platforms = sorted({r["p"] for r in rows})
+    # Platform-complete by construction, not just "whatever has history rows
+    # today": the dashboard's CAS segment (segments.ts) sums byPlatform.groww
+    # + byPlatform.sharekhan unconditionally, and a platform legitimately can
+    # have zero position_snapshot rows (e.g. right after a data reset, or a
+    # leg that has never run yet) without that key vanishing from the export -
+    # a missing key reads as "broken export" downstream, a present zero-filled
+    # array reads as "no data yet", which is what's actually true.
+    platforms = sorted(set(PLATFORMS) | {r["p"] for r in rows})
 
-    # A platform is expected to have one geography in the common schema. Keep
-    # the mapping explicit and stable rather than deriving geography from the
-    # carried values themselves. The first ordered mapping is deterministic for
-    # legacy/malformed data with conflicting instrument metadata.
+    # A platform is expected to have one geography in the common schema. Known
+    # platforms take their geography from the registry (authoritative, and
+    # available even with zero rows); the first-observed row is the fallback
+    # for any platform absent from the registry (defensive - shouldn't happen).
     platform_geography: dict[str, str] = {}
     for r in rows:
         platform_geography.setdefault(r["p"], r["g"])
+    for platform in platforms:
+        if platform in PLATFORMS:
+            platform_geography[platform] = PLATFORMS[platform]["geography"]
+        else:
+            platform_geography.setdefault(platform, "IN")
 
-    dated_totals: dict[tuple[str, str], float] = {
-        (r["d"], r["p"]): r["v"] for r in rows
+    # The carry-forward UNIT is (platform, account_ref) - each account's
+    # snapshot is a complete replacement for that account only. A platform
+    # with zero rows still gets one placeholder account so it appears
+    # zero-filled in platform_values below, matching the registry-complete
+    # guarantee above.
+    accounts: set[tuple[str, str]] = {(r["p"], r["ref"]) for r in rows}
+    observed_platforms = {p for p, _ in accounts}
+    for platform in platforms:
+        if platform not in observed_platforms:
+            accounts.add((platform, ""))
+
+    dated_totals: dict[tuple[str, str, str], float] = {
+        (r["d"], r["p"], r["ref"]): r["v"] for r in rows
     }
-    # A platform snapshot is a complete replacement snapshot. Carry the
-    # platform aggregate only when that platform has no rows on this date.
-    carried: dict[str, float] = {platform: 0.0 for platform in platforms}
+    carried: dict[tuple[str, str], float] = {acc: 0.0 for acc in accounts}
+    account_values: dict[tuple[str, str], list[float]] = {acc: [] for acc in accounts}
     platform_values: dict[str, list[float]] = {platform: [] for platform in platforms}
     geography_values: dict[str, list[float]] = {
         geography: [] for geography in sorted(set(platform_geography.values()))
@@ -78,10 +111,22 @@ def portfolio_series(conn: Any, base: str) -> dict[str, Any]:
     totals: list[float] = []
 
     for day in dates:
+        for acc in accounts:
+            platform, ref = acc
+            if (day, platform, ref) in dated_totals:
+                carried[acc] = dated_totals[(day, platform, ref)]
+            account_values[acc].append(round(carried[acc], 2))
+
+        # Platform totals sum ALL of that platform's accounts' (possibly
+        # carried) values for this day - the fix: one account updating never
+        # replaces another account's carried value under the same platform.
         for platform in platforms:
-            if (day, platform) in dated_totals:
-                carried[platform] = dated_totals[(day, platform)]
-            platform_values[platform].append(round(carried[platform], 2))
+            platform_values[platform].append(
+                round(
+                    sum(account_values[acc][-1] for acc in accounts if acc[0] == platform),
+                    2,
+                )
+            )
 
         # Build both aggregate levels from the same rounded platform values.
         # This avoids a one-cent disagreement caused by independently rounding

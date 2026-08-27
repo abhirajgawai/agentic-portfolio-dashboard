@@ -18,7 +18,9 @@ import { useEffect, useState, type ReactNode } from "react";
 import { AccountRoads } from "@/components/journey/AccountRoads";
 import { GoalMilestones } from "@/components/journey/GoalMilestones";
 import { JourneyChart } from "@/components/journey/JourneyChart";
+import { LiveJobsRow } from "@/components/journey/LiveJobsRow";
 import { MilestoneJournal } from "@/components/journey/MilestoneJournal";
+import { StalenessBanner } from "@/components/journey/StalenessBanner";
 import { TodayPanel } from "@/components/journey/TodayPanel";
 import { YearStrip } from "@/components/journey/YearStrip";
 import { useAnimatedNumber } from "@/components/journey/animation";
@@ -149,6 +151,14 @@ export function JourneyWorkspace() {
 
       <Entrance index={0}>
         <Headline latest={latest.data} masked={masked} />
+      </Entrance>
+
+      <Entrance index={0}>
+        <StalenessBanner latest={latest.data} />
+      </Entrance>
+
+      <Entrance index={0}>
+        <LiveJobsRow />
       </Entrance>
 
       <Entrance index={0}>

@@ -1,0 +1,98 @@
+{
+  "statement_period": {"from_": "24-Aug-2026", "to": "24-Aug-2026"},
+  "investor_info": {
+    "name": "TEST INVESTOR",
+    "email": "test@example.com",
+    "address": "123 TEST STREET\nTEST CITY - 000000\nTEST STATE\nINDIA",
+    "mobile": "9000000000"
+  },
+  "cas_type": "SUMMARY",
+  "file_type": "CAMS",
+  "parse_warnings": [],
+  "folios": [
+    {
+      "folio": "910000000001",
+      "amc": "UNKNOWN",
+      "schemes": [
+        {
+          "scheme": "Axis Small Cap Fund Direct Growth (Non Demat)",
+          "advisor": null,
+          "rta_code": "128SCDGG",
+          "rta": "KFINTECH",
+          "type": "EQUITY",
+          "isin": "INF846K01K35",
+          "amfi": "125354",
+          "nominees": [],
+          "open": "1914.344",
+          "close": "1914.344",
+          "close_calculated": "1914.344",
+          "valuation": {"date": "2026-08-24", "nav": "137.98", "cost": "188700.000", "value": "264141.19"},
+          "transactions": []
+        }
+      ]
+    },
+    {
+      "folio": "910000000002",
+      "amc": "UNKNOWN",
+      "schemes": [
+        {
+          "scheme": "Axis Small Cap Fund Direct Growth (Demat)",
+          "advisor": null,
+          "rta_code": "128SCDGG",
+          "rta": "KFINTECH",
+          "type": "EQUITY",
+          "isin": "INF846K01K35",
+          "amfi": "125354",
+          "nominees": [],
+          "open": "257.826",
+          "close": "257.826",
+          "close_calculated": "257.826",
+          "valuation": {"date": "2026-08-24", "nav": "137.98", "cost": "30610.000", "value": "35574.83"},
+          "transactions": []
+        }
+      ]
+    },
+    {
+      "folio": "910000000003",
+      "amc": "UNKNOWN",
+      "schemes": [
+        {
+          "scheme": "Edelweiss Nifty Midcap150 Momentum 50 Index Fund - Direct Plan Growth (Non Demat)",
+          "advisor": null,
+          "rta_code": "118MDD1G",
+          "rta": "KFINTECH",
+          "type": "EQUITY",
+          "isin": "INF754K01QD2",
+          "amfi": "150902",
+          "nominees": [],
+          "open": "3317.672",
+          "close": "3317.672",
+          "close_calculated": "3317.672",
+          "valuation": {"date": "2026-08-24", "nav": "18.8798", "cost": "61600.000", "value": "62636.98"},
+          "transactions": []
+        }
+      ]
+    },
+    {
+      "folio": "910000000004",
+      "amc": "UNKNOWN",
+      "schemes": [
+        {
+          "scheme": "Some Fund Without Cost Data - Direct Plan Growth",
+          "advisor": null,
+          "rta_code": "XYZ1",
+          "rta": "CAMS",
+          "type": "EQUITY",
+          "isin": "INF000K01ZZ9",
+          "amfi": "999999",
+          "nominees": [],
+          "open": "10.000",
+          "close": "10.000",
+          "close_calculated": "10.000",
+          "valuation": {"date": "2026-08-24", "nav": "100.00", "cost": null, "value": "1000.00"},
+          "transactions": []
+        }
+      ]
+    }
+  ]
+}

@@ -17,6 +17,7 @@ data/*.db
 data/*.db-journal
 data/*.db-shm
 data/*.db-wal
+data/*.db.bak
 data/logs/
 
 # Live personal portfolio data - the M8 export carries real holdings/values.
