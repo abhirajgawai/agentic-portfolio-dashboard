@@ -27,7 +27,7 @@ const SEVERITY_ICON = {
 function AlertRow({ alert }: { alert: Alert }) {
   const Icon = SEVERITY_ICON[alert.severity]
   return (
-    <li className="flex items-start gap-3 border-b border-border/50 px-4 py-3 last:border-0">
+    <li className="flex items-start gap-3 border-b border-border/50 px-4 py-3 transition-colors last:border-0 hover:bg-accent/40">
       <Icon
         className={
           alert.severity === 'critical'
@@ -73,6 +73,13 @@ export function AlertsScreen() {
 
   return (
     <div className="space-y-3">
+      <div>
+        <h1 className="text-2xl font-semibold">Alerts</h1>
+        <p className="text-sm text-muted-foreground">
+          Rule evaluation results from the last export — thresholds, ops, and
+          severities live in data/rules.yaml.
+        </p>
+      </div>
       <Card>
         <CardHeader className="flex-col gap-2 pb-1 sm:flex-row sm:items-center sm:justify-between">
           <CardTitle className="text-xs text-muted-foreground">

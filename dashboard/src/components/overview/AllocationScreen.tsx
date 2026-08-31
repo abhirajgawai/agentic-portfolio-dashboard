@@ -110,6 +110,13 @@ export function AllocationScreen() {
 
   return (
     <div className="space-y-4">
+      <div>
+        <h1 className="text-2xl font-semibold">Allocation</h1>
+        <p className="text-sm text-muted-foreground">
+          Portfolio composition by asset class and platform, plus today's
+          biggest movers.
+        </p>
+      </div>
       <AllocationDonuts allocation={latest.data.allocation} />
       <TrendChart history={history.data} />
       <TopMoversSection perf={perf.data} />
