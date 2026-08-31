@@ -1,42 +1,48 @@
 /**
- * Delta counter (motion-spec §2 — refresh → numbers tick 400ms).
+ * Delta counter (motion-spec §2 — refresh → numbers settle with a spring).
  * Shared by JourneyWorkspace's headline and TodayPanel's day P&L.
  */
 
+import { animate, motionValue } from 'motion'
 import { useEffect, useRef, useState } from 'react'
-import { usePrefersReducedMotion } from './motion'
+import { SPRING_CONFIG_NUMBER, usePrefersReducedMotion } from './motion'
 
 /**
- * Eases the displayed number toward `target` over `duration` ms. Skips
- * entirely under prefers-reduced-motion. Returns a float for formatters.
+ * Springs the displayed number toward `target`. Skips entirely under
+ * prefers-reduced-motion. Returns a float for formatters.
  */
 export function useAnimatedNumber(target: number, duration = 400): number {
   const [display, setDisplay] = useState(target)
   const reduced = usePrefersReducedMotion()
-  const fromRef = useRef(target)
-  const rafRef = useRef(0)
+  const valueRef = useRef(motionValue(target))
+  const previousTargetRef = useRef(target)
+
+  // Kept for source compatibility; spring physics do not use a fixed duration.
+  void duration
 
   useEffect(() => {
-    const from = fromRef.current
-    if (from === target || reduced) {
-      fromRef.current = target
+    const value = valueRef.current
+    const unsubscribe = value.on('change', setDisplay)
+
+    if (reduced) {
+      previousTargetRef.current = target
+      value.set(target)
       setDisplay(target)
-      return
+      return unsubscribe
     }
-    const start = performance.now()
-    const tick = (now: number) => {
-      const t = Math.min(1, (now - start) / duration)
-      const eased = 1 - Math.pow(1 - t, 3)
-      setDisplay(from + (target - from) * eased)
-      if (t < 1) rafRef.current = requestAnimationFrame(tick)
-      else fromRef.current = target
+
+    if (previousTargetRef.current === target) {
+      return unsubscribe
     }
-    rafRef.current = requestAnimationFrame(tick)
+
+    previousTargetRef.current = target
+
+    const controls = animate(value, target, SPRING_CONFIG_NUMBER)
     return () => {
-      cancelAnimationFrame(rafRef.current)
-      fromRef.current = target
+      controls.stop()
+      unsubscribe()
     }
-  }, [target, duration, reduced])
+  }, [target, reduced])
 
   return display
 }

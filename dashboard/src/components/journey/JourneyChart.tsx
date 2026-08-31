@@ -1,39 +1,21 @@
 "use client"
 
 /**
- * Hero journey chart — portfolio value over time from history.json with a
- * Recharts ComposedChart (Area + Line), gradient fill, per-goal ReferenceLines,
- * milestone pins, range pills (1M/3M/6M/1Y/All) and a Brush for drag-to-zoom.
- *
- * Honesty: the series is the carried-forward latest-known snapshot history. Each
- * date shows the latest available value for each holding/account, so a date
- * without a new snapshot can repeat the previous known value. Goals are
- * DB-backed (goals.json via the bridge, M8.9), never ledger facts. The
- * chart is `role="img"` decoration per a11y-spec §5 — goals and milestones
- * also render as DOM list items in GoalMilestones / MilestoneJournal.
+ * Hero journey chart — a deterministic, static SVG of the carried-forward
+ * portfolio value history.  The chart deliberately uses straight segments:
+ * snapshots are observations, not a signal to interpolate between.
  */
 
-import * as React from "react"
-import { useMemo, useState, useCallback } from "react"
-import {
-  ComposedChart,
-  Area,
-  Line,
-  Bar,
-  BarChart,
-  Cell,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Brush,
-  ReferenceLine,
-  ResponsiveContainer,
-  LabelList,
-} from "recharts"
+import { useEffect, useMemo, useRef, useState, type PointerEvent, type RefObject } from "react"
+import { scaleLinear, scaleUtc } from "@visx/scale"
+import { AreaClosed, LinePath } from "@visx/shape"
+import { LinearGradient } from "@visx/gradient"
+import { curveLinear } from "@visx/curve"
+import { interpolatePath } from "d3-interpolate-path"
+import { animate } from "motion"
 
-import { ChartContainer, ChartConfig } from "@/components/ui/chart"
-import { ChartCursor, ChartTooltipContent } from "@/components/ui/chart-tooltip"
+import { ChartContainer, type ChartConfig } from "@/components/ui/chart"
+import { ChartTooltipContent } from "@/components/ui/chart-tooltip"
 import { useGoalsData } from "@/lib/data"
 import { useInView } from "./useInView"
 import { formatInrCompact, MASK_TEXT } from "@/lib/format"
@@ -45,13 +27,11 @@ import { cn } from "@/lib/utils"
 import type { History } from "@/types/contract"
 import { usePrefersReducedMotion } from "./motion"
 import { deriveMilestones, type Milestone } from "./journal"
-import { MilestonePins, useMilestoneHover } from "./MilestonePin"
+import { clampedLabelAnchor, MilestonePins, selectVisibleMilestoneLabels, useMilestoneHover } from "./MilestonePin"
+import { DeltaChipRail } from "./DeltaChipRail"
+import { EmptyGlyph } from "./EmptyGlyph"
 
-/* ------------------------------------------------------------------ */
-/* Range pills                                                         */
-/* ------------------------------------------------------------------ */
-
-export type JourneyRange = "1M" | "3M" | "6M" | "1Y" | "All" | "Custom"
+export type JourneyRange = "1M" | "3M" | "6M" | "1Y" | "All"
 
 const RANGES: ReadonlyArray<{ key: JourneyRange; days: number | null }> = [
   { key: "1M", days: 30 },
@@ -61,16 +41,35 @@ const RANGES: ReadonlyArray<{ key: JourneyRange; days: number | null }> = [
   { key: "All", days: null },
 ]
 
+/** Observe the content box so the SVG has a real width without a chart library. */
+function useElementWidth(ref: RefObject<HTMLElement | null>): number {
+  const [width, setWidth] = useState(0)
+
+  useEffect(() => {
+    const element = ref.current
+    if (!element) return
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0]
+      if (entry) setWidth(entry.contentRect.width)
+    })
+    observer.observe(element)
+    setWidth(element.getBoundingClientRect().width)
+    return () => observer.disconnect()
+  }, [ref])
+
+  return width
+}
+
 /** Slice the ledger to the trailing window; "All" returns everything. */
 function sliceHistory(history: History, range: JourneyRange): { dates: string[]; values: number[] } {
-  const days = RANGES.find((r) => r.key === range)?.days ?? null
+  const days = RANGES.find((item) => item.key === range)?.days ?? null
   const dates = history.dates
   if (days === null || dates.length === 0) {
     return { dates, values: history.portfolioValueBase }
   }
   const last = new Date(`${dates[dates.length - 1]}T00:00:00Z`).getTime()
   const threshold = new Date(last - days * 86_400_000).toISOString().slice(0, 10)
-  const start = dates.findIndex((d) => d >= threshold)
+  const start = dates.findIndex((date) => date >= threshold)
   if (start <= 0) return { dates, values: history.portfolioValueBase }
   return {
     dates: dates.slice(start),
@@ -78,185 +77,83 @@ function sliceHistory(history: History, range: JourneyRange): { dates: string[];
   }
 }
 
-/** One markPoint per ledger index — crossings outrank appearances. */
-function chartMilestones(history: History): Milestone[] {
-  const byIndex = new Map<number, Milestone>()
-  for (const milestone of deriveMilestones(history)) {
-    const existing = byIndex.get(milestone.index)
-    const isCrossing = milestone.description.startsWith("Crossed")
-    if (!existing || (isCrossing && !existing.description.startsWith("Crossed"))) {
-      byIndex.set(milestone.index, milestone)
-    }
-  }
-  return [...byIndex.values()]
-}
-
-
-
-/* ------------------------------------------------------------------ */
-/* Day-over-day change strip (Option A — the literal "today vs past"    */
-/* comparison in numbers: a labeled diverging bar per day, not a slope  */
-/* the reader has to estimate off the line above). Capped to a small    */
-/* point count — beyond that the bars get too thin to label usefully,   */
-/* and the line chart above is already carrying the long-range trend.   */
-/* ------------------------------------------------------------------ */
-
-const DAY_CHANGE_STRIP_MAX_POINTS = 20
-
-function DayChangeStrip({
-  dates,
-  values,
-  masked,
-}: {
-  dates: readonly string[]
-  values: readonly number[]
-  masked: boolean
-}) {
-  const changes = useMemo(() => {
-    const out: { date: string; change: number }[] = []
-    for (let i = 1; i < values.length; i++) {
-      out.push({ date: dates[i] ?? "", change: (values[i] ?? 0) - (values[i - 1] ?? 0) })
-    }
-    return out
-  }, [dates, values])
-
-  if (changes.length === 0) return null
-
-  return (
-    <div className="mt-1">
-      <p className="mb-1 text-[10px] text-muted-foreground">Day-over-day change</p>
-      <div className="h-20 w-full">
-        <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={changes} margin={{ top: 18, right: 4, left: 4, bottom: 0 }}>
-            <XAxis
-              dataKey="date"
-              tickFormatter={(d: string) => d.slice(5)}
-              tick={{ fill: "var(--muted-foreground)", fontSize: 10 }}
-              axisLine={false}
-              tickLine={false}
-              interval={0}
-            />
-            <Bar dataKey="change" radius={[3, 3, 3, 3]} maxBarSize={40}>
-              {!masked && (
-                <LabelList
-                  dataKey="change"
-                  position="top"
-                  fontSize={10}
-                  fontWeight={600}
-                  formatter={(v: number) => `${v >= 0 ? "+" : ""}${formatInrCompact(v)}`}
-                  fill="var(--foreground)"
-                />
-              )}
-              {changes.map((c, i) => (
-                <Cell key={i} fill={c.change >= 0 ? "var(--gain)" : "var(--loss)"} />
-              ))}
-            </Bar>
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
-    </div>
-  )
-}
-
-/* ------------------------------------------------------------------ */
-/* Chart Config                                                        */
-/* ------------------------------------------------------------------ */
-
 const chartConfig: ChartConfig = {
   portfolio: { label: "Portfolio", color: "var(--chart-1)" },
   goal: { label: "Goal", color: "var(--warning)" },
-  milestone: { label: "Milestone", color: "var(--chart-3)" },
+  milestone: { label: "Milestone", color: "var(--primary)" },
 } satisfies ChartConfig
 
-/* ------------------------------------------------------------------ */
-/* Gradient Definitions (injected via ChartStyle)                      */
-/* ------------------------------------------------------------------ */
+const PATH_MORPH_DURATION_MS = 400
+const SPARSE_PATH_MORPH_DURATION_MS = 300
+const SPARSE_THRESHOLD = 8
+const PATH_MORPH_EASE = [0.16, 1, 0.3, 1] as const
 
-/* ------------------------------------------------------------------ */
-/* Component                                                           */
-/* ------------------------------------------------------------------ */
+type ChartPoint = { date: string; parsedDate: Date; value: number }
 
-const ANIMATION_DURATION = 800
+function chartMilestones(milestones: Milestone[]): Milestone[] {
+  const byIndex = new Map<number, Milestone>()
+  for (const milestone of milestones) {
+    const current = byIndex.get(milestone.index)
+    const crossing = milestone.description.startsWith("Crossed")
+    if (!current || crossing || !current.description.startsWith("Crossed")) byIndex.set(milestone.index, milestone)
+  }
+  return [...byIndex.values()].sort((a, b) => a.index - b.index)
+}
 
 export function JourneyChart({ history }: { history: History }) {
   const { masked } = usePrivacy()
-  // Memoized so the goals array stays referentially stable across renders
-  // (the `?? []` fallback would otherwise allocate fresh every render).
   const goalsPayload = useGoalsData().data
   const goals = useMemo(() => goalsPayload?.goals ?? [], [goalsPayload])
-  const reduced = usePrefersReducedMotion()
   const { ref, inView } = useInView<HTMLDivElement>()
-
+  const width = useElementWidth(ref)
   const [range, setRange] = useState<JourneyRange>("All")
-  const [brushRange, setBrushRange] = useState<{ startIndex: number; endIndex: number } | null>(null)
-  const [tooltipLabel, setTooltipLabel] = useState<string | number | undefined>()
+  const reduced = usePrefersReducedMotion()
+  const reducedRef = useRef(reduced)
+  reducedRef.current = reduced
+  const linePathRef = useRef<SVGPathElement | null>(null)
+  const areaPathRef = useRef<SVGPathElement | null>(null)
+  const lineDRef = useRef("")
+  const areaDRef = useRef("")
+  const nextLineDRef = useRef("")
+  const nextAreaDRef = useRef("")
+  const committedRangeRef = useRef<JourneyRange | null>(null)
+  const animationRef = useRef<{ stop: () => void } | null>(null)
+  const animationGenerationRef = useRef(0)
+  const committedModeRef = useRef<"sparse" | "dense" | null>(null)
+  const previousModeRef = useRef<"sparse" | "dense" | null>(null)
+  const geometrySyncRangeRef = useRef<JourneyRange | null>(null)
+  const [modeVisible, setModeVisible] = useState(true)
 
   const sliced = useMemo(() => sliceHistory(history, range), [history, range])
-  const milestones = useMemo(() => chartMilestones(history), [history])
-
-  // Build data array for Recharts
-  const chartData = useMemo(() => {
-    return sliced.dates.map((date, i) => ({
-      date,
-      value: sliced.values[i] ?? 0,
-      // Include breakdown data for tooltip
-      byGeography: Object.fromEntries(
-        Object.entries(history.byGeography).map(([k, v]) => [k, v[i] ?? 0])
-      ),
-      byPlatform: Object.fromEntries(
-        Object.entries(history.byPlatform).map(([k, v]) => [k, v[i] ?? 0])
-      ),
-    }))
-  }, [sliced.dates, sliced.values, history.byGeography, history.byPlatform])
-
-  // Compute yMax (dataMax * 1.06, goals excluded from scale)
+  const chartData = useMemo<ChartPoint[]>(
+    () =>
+      sliced.dates.map((date, index) => ({
+        date,
+        parsedDate: new Date(`${date}T00:00:00Z`),
+        value: sliced.values[index] ?? 0,
+      })),
+    [sliced.dates, sliced.values]
+  )
   const yMax = useMemo(() => {
-    const visibleValues = sliced.values.filter((v) => Number.isFinite(v))
-    if (visibleValues.length === 0) return undefined
-    const dataMax = Math.max(...visibleValues)
+    const values = sliced.values.filter((value) => Number.isFinite(value))
+    if (values.length === 0) return undefined
+    const dataMax = Math.max(...values)
     return dataMax > 0 ? dataMax * 1.06 : dataMax + Math.max(Math.abs(dataMax) * 0.06, 1)
   }, [sliced.values])
-
-  // Visible goals within yMax
-  const visibleGoals = useMemo(() => {
-    if (yMax === undefined) return []
-    return goals.filter(
-      (goal) =>
-        Number.isFinite(goal.targetAmount) &&
-        goal.targetAmount >= 0 &&
-        goal.targetAmount <= yMax
-    )
-  }, [goals, yMax])
-
-  // Milestones inside the current window
-  const visibleMilestones = useMemo(() => {
-    return milestones.filter((m) => sliced.dates.includes(m.date))
-  }, [milestones, sliced.dates])
-
-  // Track active milestone for pin tooltip
-  const activeMilestoneDate = useMilestoneHover(visibleMilestones, tooltipLabel)
-
-  // Handle brush change — update range pills to custom range
-  const handleBrushChange = useCallback(({ startIndex, endIndex }: { startIndex: number; endIndex: number }) => {
-    if (startIndex === endIndex) {
-      setBrushRange(null)
-      setRange("All")
-      return
-    }
-    setBrushRange({ startIndex, endIndex })
-    // Create a custom range indicator
-    setRange("Custom")
-  }, [])
-
-  // Clear custom brush range
-  const clearCustomRange = useCallback(() => {
-    setBrushRange(null)
-    setRange("All")
-  }, [])
+  const visibleGoals = useMemo(
+    () =>
+      yMax === undefined
+        ? []
+        : goals.filter(
+            (goal) =>
+              Number.isFinite(goal.targetAmount) && goal.targetAmount >= 0 && goal.targetAmount <= yMax
+          ),
+    [goals, yMax]
+  )
 
   const isEmpty = history.dates.length < 2
   const isShort = sliced.values.length < 2
-
+  const mode: "sparse" | "dense" = sliced.values.length < SPARSE_THRESHOLD ? "sparse" : "dense"
   const firstDate = sliced.dates[0]
   const lastDate = sliced.dates[sliced.dates.length - 1]
   const firstValue = sliced.values[0] ?? 0
@@ -269,11 +166,193 @@ export function JourneyChart({ history }: { history: History }) {
         firstDate ? formatShortDate(firstDate) : "—"
       } to ${formatInrCompact(lastValue)} on ${lastDate ? formatShortDate(lastDate) : "—"}`
 
-  // Format x-axis labels (MMM DD)
-  const formatXLabel = (date: string) => date.slice(5)
-
-  // Privacy-aware formatters
   const formatYTick = (value: number) => (masked ? MASK_TEXT : formatInrCompact(value))
+  const formatXLabel = (date: string) => date.slice(5)
+  const height = mode === "sparse" ? 220 : 320
+  const margin = mode === "sparse"
+    ? { top: 24, right: 16, bottom: 8, left: 16 }
+    : { top: 10, right: 10, bottom: 0, left: 0 }
+  const xDomain = useMemo<[Date, Date]>(() => {
+    const first = chartData[0]?.parsedDate
+    const last = chartData.at(-1)?.parsedDate
+    if (!first || !last) return [new Date(0), new Date(86_400_000)]
+    if (first.getTime() !== last.getTime()) return [first, last]
+
+    // scaleUtc needs a non-degenerate domain. A symmetric day of padding keeps
+    // a one-point/equal-date series centered without inventing another datum.
+    const padding = 12 * 60 * 60 * 1000
+    return [new Date(first.getTime() - padding), new Date(last.getTime() + padding)]
+  }, [chartData])
+  const plotWidth = Math.max(width, 1)
+  const xScale = scaleUtc({
+    domain: xDomain,
+    range: [margin.left, plotWidth - margin.right],
+  })
+  const yScale = scaleLinear({
+    domain: [0, yMax ?? 1],
+    range: [height - margin.bottom, margin.top],
+  })
+  const yTicks = yScale.ticks(5)
+  const xStep = Math.max(1, Math.ceil(chartData.length / 10))
+  const dense = mode === "dense"
+  const showPoints = dense && chartData.length <= 12
+  const allMilestones = useMemo(() => chartMilestones(deriveMilestones(history)), [history])
+  const visibleMilestones = useMemo(() => {
+    const start = sliced.dates[0]
+    const end = sliced.dates.at(-1)
+    return allMilestones.filter((milestone) => (!start || milestone.date >= start) && (!end || milestone.date <= end))
+  }, [allMilestones, sliced.dates])
+  const [tooltip, setTooltip] = useState<{
+    point: ChartPoint
+    x: number
+    y: number
+  } | null>(null)
+  const tooltipMilestoneDate = useMilestoneHover(allMilestones, tooltip?.point.date)
+  const activeMilestoneDate = visibleMilestones.some((milestone) => milestone.date === tooltip?.point.date)
+    ? tooltip?.point.date
+    : tooltipMilestoneDate
+  const significantMilestoneDates = useMemo(() => {
+    const labeledIds = selectVisibleMilestoneLabels(visibleMilestones, xScale)
+    return new Set(visibleMilestones.filter((m) => labeledIds.has(m.id)).map((m) => m.date))
+  }, [visibleMilestones, xScale])
+  const latestHistoryDate = history.dates.at(-1)
+  const justCrossedDate = latestHistoryDate
+    ? allMilestones.find((milestone) => milestone.date === latestHistoryDate)?.date ?? null
+    : null
+
+  const handlePointerMove = (event: PointerEvent<SVGRectElement>) => {
+    const svg = event.currentTarget.ownerSVGElement
+    if (!svg || chartData.length === 0) return
+    const bounds = svg.getBoundingClientRect()
+    const localX = ((event.clientX - bounds.left) / Math.max(bounds.width, 1)) * plotWidth
+    let nearest = chartData[0]!
+    let nearestDistance = Math.abs(xScale(nearest.parsedDate) - localX)
+    for (const point of chartData.slice(1)) {
+      const distance = Math.abs(xScale(point.parsedDate) - localX)
+      if (distance < nearestDistance) {
+        nearest = point
+        nearestDistance = distance
+      }
+    }
+    setTooltip({ point: nearest, x: xScale(nearest.parsedDate), y: yScale(nearest.value) })
+  }
+
+  useEffect(() => {
+    const modeChanged = committedModeRef.current !== null && committedModeRef.current !== mode
+    const lineElement = linePathRef.current
+    const areaElement = areaPathRef.current
+    const nextLineD = nextLineDRef.current
+    const nextAreaD = nextAreaDRef.current
+    const previousLineD = lineDRef.current || nextLineD
+    const previousAreaD = areaDRef.current || nextAreaD
+
+    // Preserve the exact in-flight shape before interrupting it. The next
+    // range then morphs from what is visible, not from an older completed d.
+    const previousAnimation = animationRef.current
+    animationRef.current = null
+    animationGenerationRef.current += 1
+    previousAnimation?.stop()
+
+    const shouldMorph = committedRangeRef.current !== null && committedRangeRef.current !== range && !modeChanged && !reducedRef.current
+    if (!shouldMorph) {
+      lineDRef.current = nextLineD
+      areaDRef.current = nextAreaD
+      lineElement?.setAttribute("d", nextLineD)
+      areaElement?.setAttribute("d", nextAreaD)
+    } else {
+      const lineInterpolator = interpolatePath(previousLineD, nextLineD)
+      const areaInterpolator = interpolatePath(previousAreaD, nextAreaD)
+      const generation = animationGenerationRef.current
+      animationRef.current = animate(0, 1, {
+        duration: (mode === "sparse" ? SPARSE_PATH_MORPH_DURATION_MS : PATH_MORPH_DURATION_MS) / 1000,
+        ease: PATH_MORPH_EASE,
+        onUpdate: (t) => {
+          if (animationGenerationRef.current !== generation) return
+          const lineD = lineInterpolator(t)
+          const areaD = areaInterpolator(t)
+          lineDRef.current = lineD
+          areaDRef.current = areaD
+          linePathRef.current?.setAttribute("d", lineD)
+          areaPathRef.current?.setAttribute("d", areaD)
+        },
+        onComplete: () => {
+          if (animationGenerationRef.current !== generation) return
+          lineDRef.current = nextLineD
+          areaDRef.current = nextAreaD
+          animationRef.current = null
+        },
+      })
+    }
+    committedRangeRef.current = range
+    committedModeRef.current = mode
+
+    return () => {
+      // Stopping must not snap back to the old range's target. Capture the
+      // displayed interpolation as the committed source for the next effect.
+      const displayedLineD = lineElement?.getAttribute("d")
+      const displayedAreaD = areaElement?.getAttribute("d")
+      if (displayedLineD) lineDRef.current = displayedLineD
+      if (displayedAreaD) areaDRef.current = displayedAreaD
+      const activeAnimation = animationRef.current
+      animationRef.current = null
+      animationGenerationRef.current += 1
+      activeAnimation?.stop()
+    }
+  }, [range, mode])
+
+  useEffect(() => {
+    // Geometry changes (resize, scale changes, or same-range refetches) must
+    // replace both paths directly. The range effect above owns morphs; skip
+    // this effect's first run for each new range so it cannot cancel one.
+    if (geometrySyncRangeRef.current !== null && geometrySyncRangeRef.current !== range) {
+      geometrySyncRangeRef.current = range
+      return
+    }
+    geometrySyncRangeRef.current = range
+
+    const activeAnimation = animationRef.current
+    animationRef.current = null
+    animationGenerationRef.current += 1
+    activeAnimation?.stop()
+
+    const latestLineD = nextLineDRef.current
+    const latestAreaD = nextAreaDRef.current
+    lineDRef.current = latestLineD
+    areaDRef.current = latestAreaD
+    linePathRef.current?.setAttribute("d", latestLineD)
+    areaPathRef.current?.setAttribute("d", latestAreaD)
+  }, [chartData, height, margin.bottom, margin.left, margin.right, margin.top, plotWidth, range, yMax])
+
+  useEffect(() => {
+    if (previousModeRef.current === null) {
+      previousModeRef.current = mode
+      return
+    }
+    if (previousModeRef.current === mode) return
+    previousModeRef.current = mode
+    if (reduced) {
+      setModeVisible(true)
+      return
+    }
+    setModeVisible(false)
+    const frame = requestAnimationFrame(() => setModeVisible(true))
+    return () => cancelAnimationFrame(frame)
+  }, [mode, reduced])
+
+  useEffect(() => {
+    if (!reduced) return
+    const activeAnimation = animationRef.current
+    animationRef.current = null
+    animationGenerationRef.current += 1
+    activeAnimation?.stop()
+
+    const latestLineD = nextLineDRef.current
+    const latestAreaD = nextAreaDRef.current
+    lineDRef.current = latestLineD
+    areaDRef.current = latestAreaD
+    linePathRef.current?.setAttribute("d", latestLineD)
+    areaPathRef.current?.setAttribute("d", latestAreaD)
+  }, [reduced])
 
   return (
     <Card>
@@ -286,203 +365,221 @@ export function JourneyChart({ history }: { history: History }) {
             </p>
           </div>
           <div role="group" aria-label="Chart range" className="flex items-center gap-1 overflow-x-auto">
-            {RANGES.map((r) => (
+            {RANGES.map((item) => (
               <button
-                key={r.key}
+                key={item.key}
                 type="button"
-                aria-pressed={range === r.key}
-                onClick={() => {
-                  setRange(r.key)
-                  setBrushRange(null)
-                }}
+                aria-pressed={range === item.key}
+                onClick={() => setRange(item.key)}
                 className={cn(
                   "rounded-full px-2.5 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                  range === r.key
+                  range === item.key
                     ? "bg-primary text-primary-foreground"
                     : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
                 )}
               >
-                {r.key}
+                {item.key}
               </button>
             ))}
-            {brushRange && (
-              <button
-                type="button"
-                onClick={clearCustomRange}
-                aria-label="Clear custom range"
-                className={cn(
-                  "rounded-full px-2.5 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                  "bg-warning text-warning-foreground flex items-center gap-1"
-                )}
-              >
-                Custom
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                  <line x1="18" y1="6" x2="6" y2="18" />
-                  <line x1="6" y1="6" x2="18" y2="18" />
-                </svg>
-              </button>
-            )}
           </div>
         </div>
 
         {isEmpty ? (
           <div className="flex h-80 items-center justify-center text-xs text-muted-foreground">
-            No history yet — snapshots accumulate from the first pipeline run
+            <div className="flex flex-col items-center gap-2">
+              <EmptyGlyph className="h-10 w-16" />
+              <span>No history yet — snapshots accumulate from the first pipeline run</span>
+            </div>
           </div>
         ) : (
           <>
             {isShort && (
               <p className="mb-2 text-[11px] text-warning">
-                Only {sliced.values.length} data point{sliced.values.length === 1 ? "" : "s"} in
-                this range — values carry forward until a newer snapshot is available
+                Only {sliced.values.length} data point{sliced.values.length === 1 ? "" : "s"} in this range — values carry forward until a newer snapshot is available
               </p>
             )}
-            <div ref={ref} role="img" aria-label={ariaLabel} className="h-80 w-full">
-              {inView ? (
+            <div ref={ref} role="img" aria-label={ariaLabel} className={cn("w-full", mode === "sparse" ? "h-[220px]" : "h-80")}>
+              {inView && width > 0 ? (
                 <ChartContainer config={chartConfig} className="h-full w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <ComposedChart
-                      data={chartData}
-                      accessibilityLayer
-                      margin={{ top: 10, right: 10, bottom: 0, left: 0 }}
-                    >
-                    <defs>
-                      <linearGradient id="journeyPortfolioGradient" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="var(--chart-1)" stopOpacity={0.18} />
-                        <stop offset="95%" stopColor="var(--chart-1)" stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid
-                      horizontal={true}
-                      vertical={false}
-                      strokeDasharray="4 4"
-                      stroke="var(--border)"
-                    />
-                    <XAxis
-                      dataKey="date"
-                      type="category"
-                      tickLine={false}
-                      axisLine={{ stroke: "var(--border)" }}
-                      tick={{ fill: "var(--muted-foreground)", fontSize: 11 }}
-                      tickFormatter={formatXLabel}
-                      interval={Math.max(1, Math.floor(sliced.dates.length / 10))}
-                      dy={8}
-                    />
-                    <YAxis
-                      type="number"
-                      domain={[0, yMax ?? "auto"]}
-                      tickLine={false}
-                      axisLine={false}
-                      tick={{ fill: "var(--muted-foreground)", fontSize: 11 }}
-                      tickFormatter={formatYTick}
-                      tickCount={5}
-                      width={60}
-                    />
-                    <Tooltip
-                      content={<ChartTooltipContent
-                        formatter={(value: number | string | undefined, name: string) => {
-                          if (name === "value") return masked ? MASK_TEXT : formatInrCompact(value as number)
-                          return value
-                        }}
-                      />}
-                      cursor={<ChartCursor strokeDasharray="4 4" />}
-                      labelFormatter={(label: React.ReactNode) => formatXLabel(String(label)) as any}
-                      wrapperStyle={{ outline: "none" }}
-                      contentStyle={{
-                        backgroundColor: "hsl(var(--muted))",
-                        border: "1px solid hsl(var(--border))",
-                        borderRadius: "var(--radius)",
-                        padding: "8px 12px",
-                        boxShadow:
-                          "0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)",
-                      }}
-                      // @ts-expect-error - recharts Tooltip supports onChange at runtime but types don't include it
-                      onChange={(label: string | number) => setTooltipLabel(label)}
-                    />
-                    {/* Brush for drag-to-zoom */}
-                    <Brush
-                      startIndex={brushRange?.startIndex ?? 0}
-                      endIndex={brushRange?.endIndex ?? chartData.length - 1}
-                      onChange={handleBrushChange}
-                      fill="var(--primary)"
-                      fillOpacity={0.08}
-                      stroke="var(--primary)"
-                      strokeWidth={1}
-                      strokeDasharray="4 4"
-                      className="cursor-ew-resize"
-                    />
-                    {/* Gradient Area (bottom layer) */}
-                    <Area
-                      type="linear"
-                      dataKey="value"
-                      fill="url(#journeyPortfolioGradient)"
-                      style={{
-                        animation: reduced
-                          ? "none"
-                          : `area-fade ${ANIMATION_DURATION}ms var(--ease-out) forwards`,
-                      }}
-                    />
-                    {/* Goal ReferenceLines */}
-                    {visibleGoals.map((goal) => (
-                      <ReferenceLine
-                        key={goal.id}
-                        y={goal.targetAmount}
-                        stroke="var(--warning)"
-                        strokeDasharray="4 4"
-                        strokeWidth={1.5}
-                        label={{
-                          position: "insideTop",
-                          fill: "var(--warning)",
-                          fontSize: 10,
-                          formatter: () => `Goal: ${formatInrCompact(goal.targetAmount)}`,
-                        }}
-                      />
-                    ))}
-                    {/* Animated Line (top layer) */}
-                    <Line
-                      type="linear"
-                      dataKey="value"
-                      stroke="var(--chart-1)"
-                      strokeWidth={2.5}
-                      dot={sliced.values.length <= 12}
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      style={{
-                        animation: reduced
-                          ? "none"
-                          : `line-draw ${ANIMATION_DURATION}ms var(--ease-out) forwards`,
-                      }}
-                    >
-                      {/* Option A: direct value labels instead of hover-only —
-                          only when there are few enough points to not collide. */}
-                      {!masked && sliced.values.length <= 12 && (
-                        <LabelList
-                          dataKey="value"
-                          position="top"
-                          offset={10}
-                          fontSize={11}
-                          fontWeight={600}
-                          fill="var(--foreground)"
-                          formatter={(v: number) => formatInrCompact(v)}
-                        />
-                      )}
-                    </Line>
-                    {/* Milestone Pins */}
-                    <MilestonePins
-                      milestones={visibleMilestones}
-                      slicedDates={sliced.dates}
-                      activeDate={activeMilestoneDate ?? undefined}
-                    />
-                    </ComposedChart>
-                  </ResponsiveContainer>
-                </ChartContainer>
+                    <div className={cn("relative h-full w-full transition-opacity duration-150 motion-reduce:transition-none", modeVisible ? "opacity-100" : "opacity-0")}>
+                    <svg width={plotWidth} height={height} viewBox={`0 0 ${plotWidth} ${height}`} className="block" aria-hidden="true">
+                       <defs>
+                        <LinearGradient
+                          id="journey-area-gradient"
+                          from="var(--chart-1)"
+                          to="var(--chart-1)"
+                          fromOpacity={0.32}
+                          toOpacity={0}
+                        >
+                          <stop offset="0%" stopColor="var(--chart-1)" stopOpacity={0.32} />
+                          <stop offset="55%" stopColor="var(--chart-1)" stopOpacity={0.12} />
+                          <stop offset="100%" stopColor="var(--chart-1)" stopOpacity={0} />
+                        </LinearGradient>
+                         <filter id="journey-glow" x="-50%" y="-50%" width="200%" height="200%">
+                           <feGaussianBlur stdDeviation="3" result="blur1" />
+                           <feGaussianBlur stdDeviation="7" in="SourceGraphic" result="blur2" />
+                           <feMerge>
+                             <feMergeNode in="blur2" />
+                             <feMergeNode in="blur1" />
+                             <feMergeNode in="SourceGraphic" />
+                           </feMerge>
+                         </filter>
+                       </defs>
+                       {dense && yTicks.map((tick) => {
+                        const y = yScale(tick)
+                        return (
+                          <g key={tick}>
+                            <line x1={margin.left} x2={plotWidth - margin.right} y1={y} y2={y} stroke="var(--border)" strokeDasharray="4 4" />
+                            <text x={margin.left + 4} y={y - 4} fill="var(--muted-foreground)" fontSize={11}>{formatYTick(tick)}</text>
+                          </g>
+                        )
+                      })}
+                      {visibleGoals.map((goal) => {
+                        const y = yScale(goal.targetAmount)
+                        return (
+                          <g key={goal.id}>
+                            <line x1={margin.left} x2={plotWidth - margin.right} y1={y} y2={y} stroke="var(--warning)" strokeDasharray="4 4" strokeWidth={1.5} />
+                            <text x={plotWidth - margin.right - 4} y={y - 4} textAnchor="end" fill="var(--warning)" fontSize={10}>
+                              {masked ? "Goal" : `Goal: ${formatInrCompact(goal.targetAmount)}`}
+                            </text>
+                          </g>
+                        )
+                      })}
+                       <AreaClosed<ChartPoint>
+                         data={chartData}
+                        x={(point) => xScale(point.parsedDate)}
+                        y={(point) => yScale(point.value)}
+                        yScale={yScale}
+                         curve={curveLinear}
+                         fill="url(#journey-area-gradient)"
+                       >
+                          {({ path }) => {
+                            const nextD = path(chartData) ?? ""
+                            nextAreaDRef.current = nextD
+                            return <path ref={areaPathRef} d={areaDRef.current || nextD} fill="url(#journey-area-gradient)" />
+                          }}
+                       </AreaClosed>
+                      <LinePath<ChartPoint>
+                        data={chartData}
+                        x={(point) => xScale(point.parsedDate)}
+                        y={(point) => yScale(point.value)}
+                        curve={curveLinear}
+                        stroke="var(--chart-1)"
+                         strokeWidth={2.5}
+                         strokeLinecap="round"
+                         strokeLinejoin="round"
+                         filter="url(#journey-glow)"
+                       >
+                           {({ path }) => {
+                            const nextD = path(chartData) ?? ""
+                            nextLineDRef.current = nextD
+                            return (
+                             <path
+                               ref={linePathRef}
+                               d={lineDRef.current || nextD}
+                               fill="none"
+                               stroke="var(--chart-1)"
+                               strokeWidth={2.5}
+                               strokeLinecap="round"
+                               strokeLinejoin="round"
+                               filter="url(#journey-glow)"
+                             />
+                           )
+                         }}
+                       </LinePath>
+                        {chartData.slice(0, -1).map((point) => {
+                         if (dense && !showPoints) return null
+                         const x = xScale(point.parsedDate)
+                         const y = yScale(point.value)
+                         const hasMilestoneLabel = significantMilestoneDates.has(point.date)
+                         const valueAnchor = clampedLabelAnchor(x, plotWidth)
+                         return (
+                           <g key={point.date}>
+                             <circle cx={x} cy={y} r={dense ? 3 : 5} fill="var(--chart-1)" filter={!dense ? "url(#journey-glow)" : undefined} />
+                             {!masked && !hasMilestoneLabel && <text x={valueAnchor.x} y={dense ? y - 10 : y - 12} textAnchor={valueAnchor.textAnchor} fill="var(--foreground)" fontSize={11} fontWeight={600}>{formatInrCompact(point.value)}</text>}
+                             {!dense && <text x={x} y={y + 18} textAnchor="middle" fill="var(--muted-foreground)" fontSize={10}>{formatXLabel(point.date)}</text>}
+                           </g>
+                         )
+                       })}
+                       {chartData.at(-1) && (() => {
+                         const point = chartData.at(-1)!
+                         const x = xScale(point.parsedDate)
+                         const y = yScale(point.value)
+                         const hasMilestoneLabel = significantMilestoneDates.has(point.date)
+                         const valueAnchor = clampedLabelAnchor(x, plotWidth)
+                         return (
+                            <g key={`today-${point.date}`}>
+                             {!reduced && (
+                               <circle
+                                 cx={x}
+                                 cy={y}
+                                 r={4}
+                                 fill="var(--chart-1)"
+                                 opacity={0.4}
+                                 filter="url(#journey-glow)"
+                                 style={{ animation: "journey-pulse-ring 1.8s var(--ease-out) infinite" }}
+                               />
+                             )}
+                              <circle cx={x} cy={y} r={dense ? 3 : 5} fill="var(--chart-1)" filter="url(#journey-glow)" />
+                              {!masked && !hasMilestoneLabel && <text x={valueAnchor.x} y={dense ? y - 10 : y - 12} textAnchor={valueAnchor.textAnchor} fill="var(--foreground)" fontSize={11} fontWeight={600}>{formatInrCompact(point.value)}</text>}
+                              {!dense && <text x={x} y={y + 18} textAnchor="middle" fill="var(--muted-foreground)" fontSize={10}>{formatXLabel(point.date)}</text>}
+                           </g>
+                         )
+                        })()}
+                       <MilestonePins
+                         milestones={visibleMilestones}
+                         xScale={xScale}
+                         yScale={yScale}
+                         plotWidth={plotWidth}
+                         activeDate={activeMilestoneDate ?? undefined}
+                         justCrossedDate={justCrossedDate}
+                       />
+                        {dense && chartData.map((point, index) =>
+                        index % xStep === 0 ? (
+                          <text key={`x-${point.date}`} x={xScale(point.parsedDate)} y={height - 4} textAnchor="middle" fill="var(--muted-foreground)" fontSize={11}>
+                            {formatXLabel(point.date)}
+                          </text>
+                        ) : null
+                       )}
+                       <rect
+                         x={0}
+                         y={0}
+                         width={plotWidth}
+                         height={height}
+                         fill="transparent"
+                         onPointerMove={handlePointerMove}
+                         onPointerLeave={() => setTooltip(null)}
+                         style={{ cursor: "crosshair", pointerEvents: "all" }}
+                       />
+                      </svg>
+                     {tooltip && (
+                       <div
+                         className="pointer-events-none absolute z-10"
+                         style={{
+                           left: Math.min(Math.max(tooltip.x + 10, 0), Math.max(plotWidth - 170, 0)),
+                           top: Math.max(tooltip.y - 70, 0),
+                         }}
+                       >
+                         <ChartTooltipContent
+                           active
+                           label={formatShortDate(tooltip.point.date)}
+                           payload={[{
+                             value: tooltip.point.value,
+                             name: "portfolio",
+                             color: "var(--chart-1)",
+                             payload: { name: "portfolio", value: tooltip.point.value },
+                           }]}
+                           formatter={(value) => masked ? MASK_TEXT : formatInrCompact(Number(value))}
+                         />
+                       </div>
+                     )}
+                    </div>
+                 </ChartContainer>
               ) : (
-                <Skeleton className="h-80 w-full" />
+                 <Skeleton className={cn("w-full", mode === "sparse" ? "h-[220px]" : "h-80")} />
               )}
             </div>
-            {sliced.values.length >= 2 && sliced.values.length <= DAY_CHANGE_STRIP_MAX_POINTS && (
-              <DayChangeStrip dates={sliced.dates} values={sliced.values} masked={masked} />
-            )}
+            {mode === "sparse" && <DeltaChipRail dates={sliced.dates} values={sliced.values} masked={masked} />}
           </>
         )}
       </CardContent>

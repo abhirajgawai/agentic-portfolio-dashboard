@@ -228,7 +228,7 @@ export function PropertiesScreen() {
             <CardTitle className="text-xs text-muted-foreground">Total Value</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-semibold tabular-nums">
+            <div className="font-headline text-3xl tabular-nums">
               {masked ? MASK_TEXT : formatInrCompact(totalValue)}
             </div>
           </CardContent>

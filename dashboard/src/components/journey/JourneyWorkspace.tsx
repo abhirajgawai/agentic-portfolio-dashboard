@@ -14,7 +14,7 @@
  *   <JourneyWorkspace />  (no props — self-contained)
  */
 
-import { useEffect, useState, type ReactNode } from "react";
+import { motion, type Variants } from "motion/react";
 import { AccountRoads } from "@/components/journey/AccountRoads";
 import { GoalMilestones } from "@/components/journey/GoalMilestones";
 import { JourneyChart } from "@/components/journey/JourneyChart";
@@ -30,41 +30,22 @@ import { ErrorState } from "@/components/layout/states";
 import { useAlerts, useHistory, useLatest } from "@/lib/data";
 import { formatAsOf, formatInrCompact, MASK_TEXT } from "@/lib/format";
 import { usePrivacy } from "@/lib/privacy";
-import { cn } from "@/lib/utils";
 import type { Latest } from "@/types/contract";
+import { usePrefersReducedMotion } from "./motion";
 
-/* ------------------------------------------------------------------ */
-/* Entrance stagger (motion-spec §1 — fade + 6px rise, 300ms, 60ms     */
-/* apart; prefers-reduced-motion renders statically)                    */
-/* ------------------------------------------------------------------ */
+const container: Variants = {
+  hidden: {},
+  show: { transition: { staggerChildren: 0.06 } },
+};
 
-function Entrance({
-  index = 0,
-  className,
-  children,
-}: {
-  index?: number;
-  className?: string;
-  children: ReactNode;
-}) {
-  const [shown, setShown] = useState(false);
-  useEffect(() => {
-    const timer = window.setTimeout(() => setShown(true), 30);
-    return () => window.clearTimeout(timer);
-  }, []);
-  return (
-    <div
-      className={cn(
-        "transition-all duration-300 ease-out motion-reduce:transition-none motion-reduce:translate-y-0 motion-reduce:opacity-100",
-        shown ? "translate-y-0 opacity-100" : "translate-y-1.5 opacity-0",
-        className,
-      )}
-      style={{ transitionDelay: `${index * 60}ms` }}
-    >
-      {children}
-    </div>
-  );
-}
+const item: Variants = {
+  hidden: { opacity: 0, y: 12 },
+  show: {
+    opacity: 1,
+    y: 0,
+    transition: { type: "spring", stiffness: 300, damping: 26 },
+  },
+};
 
 /* ------------------------------------------------------------------ */
 /* Headline                                                            */
@@ -77,7 +58,7 @@ function Headline({ latest, masked }: { latest: Latest; masked: boolean }) {
     <div className="flex flex-wrap items-end justify-between gap-3">
       <div>
         <p className="text-xs text-muted-foreground">Net worth</p>
-        <p className="mt-1 text-3xl font-semibold tracking-tight tabular-nums">
+        <p className="font-headline mt-1 text-4xl tabular-nums sm:text-5xl">
           {masked ? MASK_TEXT : formatInrCompact(animatedTotal)}
         </p>
         <p className="mt-1 text-[11px] text-muted-foreground">
@@ -122,6 +103,7 @@ export function JourneyWorkspace() {
   const history = useHistory();
   const alerts = useAlerts();
   const { masked } = usePrivacy();
+  const reduced = usePrefersReducedMotion();
 
   if (latest.isLoading || history.isLoading || alerts.isLoading) {
     return <HeroSkeleton />;
@@ -146,43 +128,48 @@ export function JourneyWorkspace() {
   if (!latest.data || !history.data) return null;
 
   return (
-    <section className="space-y-4">
+    <motion.section
+      className="space-y-4"
+      variants={container}
+      initial={reduced ? "show" : "hidden"}
+      animate="show"
+    >
       <h1 className="sr-only">Journey</h1>
 
-      <Entrance index={0}>
+      <motion.div variants={item}>
         <Headline latest={latest.data} masked={masked} />
-      </Entrance>
+      </motion.div>
 
-      <Entrance index={0}>
+      <motion.div variants={item}>
         <StalenessBanner latest={latest.data} />
-      </Entrance>
+      </motion.div>
 
-      <Entrance index={0}>
+      <motion.div variants={item}>
         <LiveJobsRow />
-      </Entrance>
+      </motion.div>
 
-      <Entrance index={0}>
+      <motion.div variants={item}>
         <JourneyChart history={history.data} />
-      </Entrance>
+      </motion.div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <Entrance index={1}>
+        <motion.div variants={item}>
           <TodayPanel latest={latest.data} alerts={alerts.data} />
-        </Entrance>
-        <Entrance index={2}>
+        </motion.div>
+        <motion.div variants={item}>
           <AccountRoads history={history.data} />
-        </Entrance>
-        <Entrance index={3}>
+        </motion.div>
+        <motion.div variants={item}>
           <div className="space-y-4">
             <GoalMilestones valueBase={latest.data.totals.valueBase} />
             <MilestoneJournal history={history.data} />
           </div>
-        </Entrance>
+        </motion.div>
       </div>
 
-      <Entrance index={4}>
+      <motion.div variants={item}>
         <YearStrip history={history.data} />
-      </Entrance>
-    </section>
+      </motion.div>
+    </motion.section>
   );
 }

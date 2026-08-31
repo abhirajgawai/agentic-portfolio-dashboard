@@ -187,8 +187,8 @@ export function SegmentCard({
       <span className="flex flex-col gap-0.5">
         <span
           className={cn(
-            'text-2xl font-semibold tabular-nums tracking-tight',
-            featured ? 'text-primary' : '',
+            'font-semibold tabular-nums tracking-tight',
+            featured ? 'font-headline text-3xl text-primary' : 'text-2xl',
           )}
         >
           {masked || empty ? MASK_TEXT : formatInrCompact(animatedValue)}

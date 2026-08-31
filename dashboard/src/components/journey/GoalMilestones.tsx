@@ -14,6 +14,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Loader2, Pencil, Plus, Trash2 } from 'lucide-react'
+import { motion } from 'motion/react'
 import { toast } from 'sonner'
 
 import { Badge } from '@/components/ui/badge'
@@ -40,6 +41,8 @@ import { formatInrCompact, MASK_TEXT } from '@/lib/format'
 import { usePrivacy } from '@/lib/privacy'
 import { useBackendHealth } from '@/lib/useBackendHealth'
 import { cn } from '@/lib/utils'
+import { SPRING_CONFIG_MILESTONE_POP, usePrefersReducedMotion } from './motion'
+import { EmptyGlyph } from './EmptyGlyph'
 
 /* ------------------------------------------------------------------ */
 /* Progress math — derived at render time, never stored                */
@@ -75,8 +78,21 @@ function writeAck(id: number): void {
 }
 
 /** Fire the crossing toast once per goal; never twice for the same goal. */
-function useGoalCrossing(goals: Goal[], valueBase: number): void {
+function useGoalCrossing(goals: Goal[], valueBase: number): string | null {
   const ackedRef = useRef<Record<string, boolean>>({})
+  const timeoutRef = useRef<number | null>(null)
+  const mountedRef = useRef(true)
+  const [justCrossedGoalId, setJustCrossedGoalId] = useState<string | null>(null)
+
+  // Keep dependency changes from cancelling the one-shot pop reset. The guard
+  // makes the timer safe if the component unmounts before it fires.
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
+
   useEffect(() => {
     for (const goal of goals) {
       if (progress(goal, valueBase) < 1) continue
@@ -86,10 +102,18 @@ function useGoalCrossing(goals: Goal[], valueBase: number): void {
           description: `Portfolio value hit the ${formatInrCompact(goal.targetAmount)} target`,
         })
         writeAck(goal.id)
+        setJustCrossedGoalId(String(goal.id))
+        if (timeoutRef.current !== null) window.clearTimeout(timeoutRef.current)
+        timeoutRef.current = window.setTimeout(() => {
+          timeoutRef.current = null
+          if (mountedRef.current) setJustCrossedGoalId(null)
+        }, 600)
       }
       ackedRef.current[goal.id] = true
     }
   }, [goals, valueBase])
+
+  return justCrossedGoalId
 }
 
 /* ------------------------------------------------------------------ */
@@ -217,6 +241,7 @@ export function GoalMilestones({ valueBase }: { valueBase: number }) {
   const health = useBackendHealth()
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<Goal | null>(null)
+  const reduced = usePrefersReducedMotion()
 
   const goals = goalsQuery.data?.goals ?? []
 
@@ -284,7 +309,7 @@ export function GoalMilestones({ valueBase }: { valueBase: number }) {
   const dialogPending = createMutation.isPending || updateMutation.isPending
   const rowsPending = dialogPending || deleteMutation.isPending
 
-  useGoalCrossing(goals, valueBase)
+  const justCrossedGoalId = useGoalCrossing(goals, valueBase)
 
   const openAdd = () => {
     setEditing(null)
@@ -339,7 +364,10 @@ export function GoalMilestones({ valueBase }: { valueBase: number }) {
           </p>
         ) : goals.length === 0 ? (
           <p className="mt-4 rounded-md border border-dashed border-border p-3 text-center text-[11px] text-muted-foreground">
-            No goals yet — set a target to watch
+            <span className="flex flex-col items-center gap-2">
+              <EmptyGlyph className="h-10 w-16" />
+              <span>No goals yet — set a target to watch</span>
+            </span>
           </p>
         ) : (
           <ul className="mt-3 space-y-2.5">
@@ -365,9 +393,23 @@ export function GoalMilestones({ valueBase }: { valueBase: number }) {
                     </span>
                     <span className="flex shrink-0 items-center gap-0.5">
                       {reached && (
-                        <Badge variant="success" className="px-1.5 py-0 text-[10px]">
-                          Reached
-                        </Badge>
+                        reduced || justCrossedGoalId !== String(goal.id) ? (
+                          <Badge variant="success" className="px-1.5 py-0 text-[10px]">
+                            Reached
+                          </Badge>
+                        ) : (
+                          <motion.span
+                            key={justCrossedGoalId}
+                            initial={{ scale: 1 }}
+                            animate={{ scale: [1, 1.15, 1] }}
+                            transition={SPRING_CONFIG_MILESTONE_POP}
+                            className="inline-flex"
+                          >
+                            <Badge variant="success" className="px-1.5 py-0 text-[10px]">
+                              Reached
+                            </Badge>
+                          </motion.span>
+                        )
                       )}
                       <Button
                         variant="ghost"

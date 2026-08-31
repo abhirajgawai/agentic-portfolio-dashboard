@@ -6,6 +6,9 @@
 
 import { useEffect, useState } from 'react'
 
+export const SPRING_CONFIG_MILESTONE_POP = { type: "spring", stiffness: 420, damping: 18, mass: 0.6 } as const
+export const SPRING_CONFIG_NUMBER = { type: "spring", stiffness: 180, damping: 22, mass: 1 } as const
+
 let cachedReduceMotion: boolean | null = null
 
 /** Cached prefers-reduced-motion check — read once per session. */

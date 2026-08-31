@@ -1,168 +1,169 @@
 "use client"
 
-/**
- * MilestonePin — custom pin marker for JourneyChart milestones.
- *
- * Recharts only provides `ReferenceDot` (a circle). This component uses
- * `useXAxisScale` / `useYAxisScale` to position an SVG pin shape at
- * the correct data coordinates. The pin matches the ECharts markPoint
- * pin: diamond head with a tapered tail.
- *
- * This component MUST be rendered as a child of ComposedChart/AreaChart/etc.
- * to access the Recharts scale context via hooks.
- */
-
 import * as React from "react"
-import { useXAxisScale, useYAxisScale } from "recharts"
-import { useId } from "react"
-import { ChartTooltipContent } from "@/components/ui/chart-tooltip"
-import { formatInrCompact, MASK_TEXT } from "@/lib/format"
+import { animate } from "motion"
+import { MASK_TEXT } from "@/lib/format"
 import { usePrivacy } from "@/lib/privacy"
+import type { Milestone } from "./journal"
+import { SPRING_CONFIG_MILESTONE_POP, usePrefersReducedMotion } from "./motion"
 
-interface MilestonePinProps {
-  /** X coordinate in data space (date string) */
-  x: string
-  /** Y coordinate in data space (portfolio value in base currency) */
-  y: number
-  /** Human-readable description for tooltip */
-  description: string
-  /** Optional: payload for additional context */
-  payload?: Record<string, unknown>
-  /** Whether this pin is currently active/hovered */
-  isActive?: boolean
+function candidateMilestoneIds(milestones: Milestone[]): Set<string> {
+  const crossings = milestones
+    .filter((milestone) => milestone.description.startsWith("Crossed"))
+    .sort((a, b) => b.value - a.value || b.date.localeCompare(a.date) || a.id.localeCompare(b.id))
+  if (crossings.length > 0) return new Set(crossings.slice(0, 2).map((milestone) => milestone.id))
+
+  const latestAth = milestones
+    .filter((milestone) => milestone.description.startsWith("New all-time high"))
+    .sort((a, b) => b.date.localeCompare(a.date) || b.value - a.value || a.id.localeCompare(b.id))[0]
+  return latestAth ? new Set([latestAth.id]) : new Set()
 }
 
-export function MilestonePin({
-  x,
-  y,
-  description,
-  payload,
-  isActive = false,
-}: MilestonePinProps) {
-  const xScale = useXAxisScale()
-  const yScale = useYAxisScale()
-  const { masked } = usePrivacy()
-  const gradientId = useId()
+/** Rough SVG text width at fontSize 10/weight 600 — enough to detect overlap, not to typeset. */
+function estimateLabelWidth(text: string): number {
+  return text.length * 5.6 + 6
+}
 
-  // Compute SVG coordinates from data coordinates
-  const cx = xScale?.(x)
-  const cy = yScale?.(y)
+const LABEL_GAP_PX = 6
 
-  // If scales aren't ready or coords are out of bounds, don't render
-  if (cx === undefined || cy === undefined || Number.isNaN(cx) || Number.isNaN(cy)) {
-    return null
+/**
+ * Milestone labels and the chart's own per-point value labels share the same
+ * (x, y - ~11) neighborhood whenever a milestone lands on a real snapshot
+ * date — which is the common case, not an edge case, since milestones are
+ * derived from the same ledger. Two independent label systems drawing at a
+ * fixed offset with no mutual awareness renders as overlapping/garbled text.
+ * This is the single source of truth for "which milestones get a label" so
+ * JourneyChart can suppress its own point label at the same dates.
+ */
+export function selectVisibleMilestoneLabels(
+  milestones: Milestone[],
+  xScale: (date: Date) => number
+): Set<string> {
+  const candidates = candidateMilestoneIds(milestones)
+  const kept = new Set<string>()
+  let lastX: number | null = null
+  let lastHalfWidth = 0
+  for (const milestone of milestones) {
+    if (!candidates.has(milestone.id)) continue
+    const x = xScale(new Date(`${milestone.date}T00:00:00Z`))
+    const halfWidth = estimateLabelWidth(milestone.description) / 2
+    if (lastX !== null && x - halfWidth < lastX + lastHalfWidth + LABEL_GAP_PX) continue
+    kept.add(milestone.id)
+    lastX = x
+    lastHalfWidth = halfWidth
   }
+  return kept
+}
 
-  // Pin SVG path: diamond head (6px radius) + tapered tail
-  // M0,0 L-6,12 L0,14 L6,12 Z — centered at (0,0), tip at y=14
-  const pinPath = "M0,0 L-6,12 L0,14 L6,12 Z"
+/** Clamp a centered SVG text label so it never renders past the chart edges. */
+export function clampedLabelAnchor(
+  x: number,
+  plotWidth: number,
+  halfWidth = 30
+): { x: number; textAnchor: "start" | "middle" | "end" } {
+  const pad = 4
+  if (x - halfWidth < pad) return { x: pad, textAnchor: "start" }
+  if (x + halfWidth > plotWidth - pad) return { x: plotWidth - pad, textAnchor: "end" }
+  return { x, textAnchor: "middle" }
+}
 
-  const pinValue = (payload?.value as number) ?? y
+function MilestoneDot({
+  milestone,
+  active,
+  justCrossed,
+  reduced,
+}: {
+  milestone: Milestone
+  active: boolean
+  justCrossed: boolean
+  reduced: boolean
+}) {
+  const [scale, setScale] = React.useState(1)
+  const previousTrigger = React.useRef<string | null>(null)
+
+  React.useEffect(() => {
+    if (reduced || !justCrossed || previousTrigger.current === milestone.date) {
+      if (reduced) setScale(1)
+      return
+    }
+    previousTrigger.current = milestone.date
+    const controls = animate(1, [1.15, 1], {
+      ...SPRING_CONFIG_MILESTONE_POP,
+      onUpdate: setScale,
+    })
+    return () => controls.stop()
+  }, [justCrossed, milestone.date, reduced])
 
   return (
-    <g transform={`translate(${cx}, ${cy})`} style={{ zIndex: 10 }}>
-      {/* Unique gradient per instance for the pin fill */}
-      <defs>
-        <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="var(--chart-3)" stopOpacity={1} />
-          <stop offset="100%" stopColor="var(--chart-3)" stopOpacity={0.8} />
-        </linearGradient>
-      </defs>
-
-      {/* Pin shape */}
-      <path
-        d={pinPath}
-        fill={`url(#${gradientId})`}
-        stroke="var(--background)"
-        strokeWidth={2}
-        style={{
-          filter: "drop-shadow(0 2px 4px rgba(0,0,0,0.15))",
-          cursor: "default",
-          transition: "transform 150ms var(--ease-out)",
-          transform: isActive ? "scale(1.15)" : "scale(1)",
-          transformOrigin: "center bottom",
-        }}
-      />
-
-      {/* Tooltip rendered inline when active — positioned above the pin */}
-      {isActive && (
-        <g transform="translate(0, -22)">
-          <ChartTooltipContent
-            active={true}
-            payload={[
-              {
-                value: pinValue,
-                name: "portfolio",
-                color: "var(--chart-3)",
-                payload: {
-                  ...payload,
-                  value: pinValue,
-                  name: "portfolio",
-                  description,
-                },
-              },
-            ]}
-            label={description}
-            formatter={(value) => (masked ? MASK_TEXT : formatInrCompact(value as number))}
-            hideIndicator
-          />
-        </g>
-      )}
-    </g>
+    <circle
+      r={active ? 6 : 5}
+      fill="var(--primary)"
+      filter="url(#journey-glow)"
+      transform={`scale(${scale})`}
+      opacity={active ? 1 : 0.9}
+    />
   )
-}
-
-/**
- * MilestonePins — renders all milestone pins for a chart.
- * This is the main export used by JourneyChart.
- */
-interface MilestonePinsProps {
-  milestones: Array<{
-    id?: string
-    date: string
-    value: number
-    description: string
-    index: number
-  }>
-  slicedDates: string[]
-  /** Currently active milestone date (for tooltip) */
-  activeDate?: string
 }
 
 export function MilestonePins({
   milestones,
-  slicedDates,
+  xScale,
+  yScale,
+  plotWidth,
   activeDate,
-}: MilestonePinsProps) {
-  // Filter milestones to only those within the current sliced window
-  const visibleMilestones = milestones.filter((m) => {
-    const idx = slicedDates.indexOf(m.date)
-    return idx !== -1
-  })
+  justCrossedDate,
+}: {
+  milestones: Milestone[]
+  xScale: (date: Date) => number
+  yScale: (value: number) => number
+  plotWidth: number
+  activeDate?: string
+  justCrossedDate?: string | null
+}) {
+  const reduced = usePrefersReducedMotion()
+  const { masked } = usePrivacy()
+  const labelIds = React.useMemo(() => selectVisibleMilestoneLabels(milestones, xScale), [milestones, xScale])
 
-  if (visibleMilestones.length === 0) return null
+  if (milestones.length === 0) return null
 
   return (
-    <g>
-      {visibleMilestones.map((milestone) => (
-        <MilestonePin
-          key={milestone.id ?? `${milestone.date}-${milestone.index}`}
-          x={milestone.date}
-          y={milestone.value}
-          description={milestone.description}
-          payload={{ value: milestone.value, index: milestone.index }}
-          isActive={activeDate === milestone.date}
-        />
-      ))}
+    <g aria-label="Portfolio milestones">
+      {milestones.map((milestone) => {
+        const x = xScale(new Date(`${milestone.date}T00:00:00Z`))
+        const y = yScale(milestone.value)
+        if (!Number.isFinite(x) || !Number.isFinite(y)) return null
+        const significant = labelIds.has(milestone.id)
+        return (
+          <g key={milestone.id} transform={`translate(${x}, ${y})`}>
+            <MilestoneDot
+              milestone={milestone}
+              active={activeDate === milestone.date}
+              justCrossed={justCrossedDate === milestone.date}
+              reduced={reduced}
+            />
+            {significant && (() => {
+              const anchor = clampedLabelAnchor(x, plotWidth, estimateLabelWidth(milestone.description) / 2)
+              return (
+                <text
+                  x={anchor.x - x}
+                  y={-11}
+                  textAnchor={anchor.textAnchor}
+                  fill="var(--foreground)"
+                  fontSize={10}
+                  fontWeight={600}
+                >
+                  {masked ? milestone.description.replace(/₹[^\s)]+/g, MASK_TEXT) : milestone.description}
+                </text>
+              )
+            })()}
+          </g>
+        )
+      })}
     </g>
   )
 }
 
-/**
- * Hook to track which milestone is being hovered via the chart's tooltip.
- * Since Recharts tooltip doesn't directly expose milestone hover,
- * we track it via the active tooltip label matching a milestone description.
- */
+/** Match a chart tooltip label to a milestone without coupling to Recharts. */
 export function useMilestoneHover(
   milestones: Array<{ date: string; description: string }>,
   tooltipLabel: string | number | undefined
