@@ -56,7 +56,7 @@ uv run portfolio cas import <file.pdf>     # parse a CAS statement -> holdings +
 uv run portfolio cas request [--force]     # CAMS+KFintech mailback (Groww folio MFs)
 uv run portfolio cas auto [--force]        # full unattended loop: request+fetch+import
 uv run portfolio nav refresh               # AMFI NAVAll.txt -> MF/ETF prices (keyless)
-uv run python -m portfolio.bridge          # FastAPI bridge for the dashboard (:8000)
+uv run python -m portfolio.bridge          # FastAPI bridge for the dashboard (:8001)
 
 uv run ruff check .                        # lint (E, F, I, UP, B, SIM; line-length ignored)
 uv run pytest                              # full suite
@@ -146,7 +146,8 @@ destructive reset — never call it without explicit user confirmation.
 
 ### Bridge (`src/portfolio/bridge.py`) — the only thing the dashboard talks to for mutations
 
-A thin FastAPI seam (loopback-only, `127.0.0.1:8000`). It **never touches broker MCPs or
+A thin FastAPI seam (loopback-only, `127.0.0.1:8001` by default — `PORTFOLIO_BRIDGE_PORT`
+overrides; :8000 belongs to Cardora, another local project). It **never touches broker MCPs or
 the DB directly** — every mutating endpoint shells out to the real `portfolio` CLI (the
 same commands you'd run by hand / the same path Task Scheduler uses) then re-runs
 `scripts/export_json.py`, so there is exactly one write path regardless of trigger
@@ -193,6 +194,33 @@ field for every bucket — read its module docstring before changing staleness l
 - `lib/privacy.tsx` — the mask-all-values toggle (`usePrivacy`), respected throughout
   by convention (`masked ? MASK_TEXT : format...(value)`); keep new money displays
   consistent with this pattern.
+
+### UI/design task process
+
+When working on UI/design tasks in `dashboard/`, follow this process:
+
+1. Before writing any UI code, state a specific visual reference you're aiming for
+   (e.g. "Linear's settings page", "Vercel dashboard", "Stripe docs", "Notion's clean
+   minimal style") rather than building from a generic template. If not given one,
+   pick the closest fit and say what was chosen.
+2. Use Tailwind CSS + shadcn/ui components as the default building blocks — the
+   `shadcn` MCP server (`.mcp.json`) is available to browse/add registry components.
+   Do not hand-roll custom CSS for things a shadcn component already solves (buttons,
+   modals, dropdowns, forms, cards, tables).
+3. Apply a consistent design system:
+   - One type scale, used consistently (don't mix font sizes ad hoc)
+   - 8px spacing grid (4/8/12/16/24/32/48/64)
+   - Limit the palette to 1 primary color, 1-2 neutrals, and semantic colors
+     (success/error/warning) — no arbitrary hex values
+   - Consistent border-radius and shadow tokens across all components
+4. After building or editing any UI, take a screenshot using the browser MCP and
+   visually review it against the stated reference before calling the task done. Call
+   out specific issues (alignment, spacing, contrast, hierarchy, crowding) and fix
+   them — don't just confirm it renders without errors.
+5. Favor whitespace and restraint over decoration. When unsure, remove an element
+   rather than add one.
+6. Never ship a first draft as final — always do at least one visual review-and-fix
+   pass using the screenshot from step 4.
 
 ## Working conventions this repo has established
 

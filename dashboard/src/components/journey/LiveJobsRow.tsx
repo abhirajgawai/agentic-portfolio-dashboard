@@ -60,12 +60,15 @@ function LiveJobItem({ platform, label, run }: { platform: 'zerodha' | 'moomoo';
     },
   })
 
+  const isError = run?.status === 'error'
+
   return (
     <div className="flex items-center gap-2 min-w-0">
       <Icon className={cn('size-3.5 shrink-0', badge.color)} />
       <span className="font-medium text-xs">{label}</span>
-      <span className="text-[11px] text-muted-foreground truncate" title={run?.error ?? undefined}>
+      <span className={cn('text-[11px] truncate', isError ? 'text-loss' : 'text-muted-foreground')} title={run?.error ?? undefined}>
         {run ? formatWhen(run.started_at) : 'no runs yet'}
+        {isError && run?.error ? ` — ${run.error}` : null}
       </span>
       <Button
         variant="ghost"

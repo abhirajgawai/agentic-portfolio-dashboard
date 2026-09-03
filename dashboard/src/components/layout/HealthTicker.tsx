@@ -9,7 +9,7 @@
  * compact data-timestamp + staleness summary.
  */
 
-import { AlertCircle, Bot, Clock, Activity } from 'lucide-react'
+import { AlertCircle, Bot, Clock, Activity, Server } from 'lucide-react'
 
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
@@ -48,7 +48,7 @@ export function HealthTicker() {
 
   // Agent status pill — reflects the bridge health poll. 'backend-offline' is
   // deliberately a DISTINCT label from 'agent offline' so the user can tell
-  // whether opencode serve or the bridge itself (:8000) is down.
+  // whether opencode serve or the bridge itself (:8001) is down.
   const agentPill =
     health.status === 'online'
       ? {
@@ -69,7 +69,7 @@ export function HealthTicker() {
               label: 'bridge down',
               color: 'text-muted-foreground',
               dot: 'bg-muted-foreground/50',
-              tip: 'Bridge (localhost:8000) unreachable — agent status unknown until it is back.',
+              tip: 'Bridge (localhost:8001) unreachable — agent status unknown until it is back.',
             }
           : {
               label: 'agent …',
@@ -77,6 +77,23 @@ export function HealthTicker() {
               dot: 'bg-muted-foreground/60',
               tip: 'Checking agent status…',
             }
+
+  // Zerodha daemon pill — LIVE probe of the session daemon (:8787/health),
+  // distinct from bridge/agent reachability: the bridge can be online while
+  // the daemon itself is down or waiting on the daily manual 2FA login. Null
+  // (not yet known / bridge unreachable) reads the same as "down" since a
+  // daemon that can't be confirmed up should never look healthy.
+  const zerodhaDaemon = health.zerodhaDaemon
+  const zerodhaPill =
+    health.status === 'loading'
+      ? { label: 'zerodha …', color: 'text-muted-foreground', dot: 'bg-muted-foreground/60', tip: 'Checking Zerodha daemon…' }
+      : health.status === 'backend-offline'
+        ? { label: 'zerodha ?', color: 'text-muted-foreground', dot: 'bg-muted-foreground/50', tip: 'Bridge unreachable — Zerodha daemon status unknown.' }
+        : zerodhaDaemon?.reachable && zerodhaDaemon.authenticated
+          ? { label: 'zerodha up', color: 'text-gain', dot: 'bg-gain', tip: 'Zerodha session daemon reachable and authenticated.' }
+          : zerodhaDaemon?.reachable
+            ? { label: 'zerodha 2FA needed', color: 'text-warning', dot: 'bg-warning', tip: 'Zerodha daemon is up but not authenticated — complete the daily browser 2FA login.' }
+            : { label: 'zerodha down', color: 'text-loss', dot: 'bg-loss', tip: 'Zerodha daemon unreachable — start it with `portfolio serve --platform zerodha`, or take a snapshot from the Journey page to auto-start it.' }
 
   return (
     <footer
@@ -134,6 +151,18 @@ export function HealthTicker() {
 
       {/* ==== STATS ==== */}
       <div className="flex items-center gap-3 ml-auto shrink-0">
+        {/* Zerodha daemon status (live probe) */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="inline-flex items-center gap-1.5">
+              <Server className={cn('size-3', zerodhaPill.color)} />
+              <span className={cn('size-1.5 rounded-full shrink-0', zerodhaPill.dot)} />
+              <span className={cn(zerodhaPill.color)}>{zerodhaPill.label}</span>
+            </span>
+          </TooltipTrigger>
+          <TooltipContent className="py-1 text-xs">{zerodhaPill.tip}</TooltipContent>
+        </Tooltip>
+
         {/* Agent status */}
         <Tooltip>
           <TooltipTrigger asChild>

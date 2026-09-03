@@ -8,8 +8,9 @@ import tailwindcss from '@tailwindcss/vite'
 //   + postcss pipeline: the theme lives in CSS (@theme / @custom-variant in
 //   src/index.css), there is no tailwind.config.js.
 // - `/api/*` is proxied to the local FastAPI bridge (src/portfolio/bridge.py,
-//   127.0.0.1:8000). `timeout` must be generous: POST /api/refresh runs the
-//   pipeline (snapshot --all --force + export) and can take minutes.
+//   127.0.0.1:8001 — Cardora owns :8000). `timeout` must be generous: POST
+//   /api/refresh runs the pipeline (snapshot --all --force + export) and can
+//   take minutes.
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: {
@@ -37,11 +38,11 @@ export default defineConfig({
   server: {
     // Bind IPv4 explicitly — without `host`, Vite binds only [::1] on this
     // machine, so http://127.0.0.1:<port> refuses connections and the proxy
-    // target (127.0.0.1:8000) is unreachable from a localhost-only origin.
+    // target (127.0.0.1:8001) is unreachable from a localhost-only origin.
     host: '127.0.0.1',
     proxy: {
       '/api': {
-        target: 'http://127.0.0.1:8000',
+        target: 'http://127.0.0.1:8001',
         changeOrigin: true,
         timeout: 600000,
       },

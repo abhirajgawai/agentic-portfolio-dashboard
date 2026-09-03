@@ -1,9 +1,10 @@
 /**
  * Bridge API types — the /api contract served by the FastAPI bridge
- * (src/portfolio/bridge.py on 127.0.0.1:8000, proxied by Vite).
+ * (src/portfolio/bridge.py on 127.0.0.1:8001, proxied by Vite).
  *
  * Three endpoints:
- *   GET  /api/health   -> { pipeline: {asOf, exportsPresent, exportsGeneratedAt}, agent: bool }
+ *   GET  /api/health   -> { pipeline: {asOf, exportsPresent, exportsGeneratedAt}, agent: bool,
+ *                          daemons: {zerodha: {reachable, authenticated}} }
  *   POST /api/refresh  -> { ok: true, summary } | 502 { ok: false, error }
  *   POST /api/ask      -> { answer, toolCalls[], turns, withinBudget }
  *                      | 503 { error: 'agent offline' }
@@ -29,6 +30,12 @@ export const HealthSchema = z.object({
     exportsGeneratedAt: z.string().nullable(),
   }),
   agent: z.boolean(),
+  daemons: z.object({
+    zerodha: z.object({
+      reachable: z.boolean(),
+      authenticated: z.boolean(),
+    }),
+  }),
 })
 
 export const ToolCallSummarySchema = z.object({

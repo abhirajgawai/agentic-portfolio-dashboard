@@ -16,6 +16,7 @@ import { animate } from "motion"
 
 import { ChartContainer, type ChartConfig } from "@/components/ui/chart"
 import { ChartTooltipContent } from "@/components/ui/chart-tooltip"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { useGoalsData } from "@/lib/data"
 import { useInView } from "./useInView"
 import { formatInrCompact, MASK_TEXT } from "@/lib/format"
@@ -106,7 +107,10 @@ export function JourneyChart({ history }: { history: History }) {
   const goals = useMemo(() => goalsPayload?.goals ?? [], [goalsPayload])
   const { ref, inView } = useInView<HTMLDivElement>()
   const width = useElementWidth(ref)
-  const [range, setRange] = useState<JourneyRange>("All")
+  // Robinhood-style default: a short window, not lifetime "All" — as more
+  // daily snapshots accumulate this naturally zooms into recent detail
+  // instead of always being dominated by the since-inception ramp.
+  const [range, setRange] = useState<JourneyRange>("1M")
   const reduced = usePrefersReducedMotion()
   const reducedRef = useRef(reduced)
   reducedRef.current = reduced
@@ -134,21 +138,28 @@ export function JourneyChart({ history }: { history: History }) {
       })),
     [sliced.dates, sliced.values]
   )
-  const yMax = useMemo(() => {
+  // Dynamic Y-domain (not anchored to 0): trading-app-style charts scale to the
+  // visible data range so day-to-day moves (~1% on a Cr-scale portfolio) read
+  // as real zig-zags instead of a near-flat line pinned against a 0 floor.
+  const yDomain = useMemo<[number, number] | undefined>(() => {
     const values = sliced.values.filter((value) => Number.isFinite(value))
     if (values.length === 0) return undefined
+    const dataMin = Math.min(...values)
     const dataMax = Math.max(...values)
-    return dataMax > 0 ? dataMax * 1.06 : dataMax + Math.max(Math.abs(dataMax) * 0.06, 1)
+    const range = dataMax - dataMin
+    const pad = range > 0 ? range * 0.15 : Math.max(Math.abs(dataMax) * 0.06, 1)
+    return [Math.max(0, dataMin - pad), dataMax + pad]
   }, [sliced.values])
+  const yMax = yDomain?.[1]
   const visibleGoals = useMemo(
     () =>
-      yMax === undefined
+      yDomain === undefined
         ? []
         : goals.filter(
             (goal) =>
-              Number.isFinite(goal.targetAmount) && goal.targetAmount >= 0 && goal.targetAmount <= yMax
+              Number.isFinite(goal.targetAmount) && goal.targetAmount >= yDomain[0] && goal.targetAmount <= yDomain[1]
           ),
-    [goals, yMax]
+    [goals, yDomain]
   )
 
   const isEmpty = history.dates.length < 2
@@ -189,13 +200,16 @@ export function JourneyChart({ history }: { history: History }) {
     range: [margin.left, plotWidth - margin.right],
   })
   const yScale = scaleLinear({
-    domain: [0, yMax ?? 1],
+    domain: yDomain ?? [0, 1],
     range: [height - margin.bottom, margin.top],
   })
-  const yTicks = yScale.ticks(5)
-  const xStep = Math.max(1, Math.ceil(chartData.length / 10))
   const dense = mode === "dense"
+  const yTicks = yScale.ticks(dense ? 6 : 5)
+  const xStep = Math.max(1, Math.ceil(chartData.length / 10))
   const showPoints = dense && chartData.length <= 12
+  // Robinhood-style trend color: one color for the whole selected range,
+  // reflecting whether the period is up or down overall (not per-day).
+  const trendColor = lastValue >= firstValue ? "var(--gain)" : "var(--loss)"
   const allMilestones = useMemo(() => chartMilestones(deriveMilestones(history)), [history])
   const visibleMilestones = useMemo(() => {
     const start = sliced.dates[0]
@@ -364,24 +378,20 @@ export function JourneyChart({ history }: { history: History }) {
               Net worth over time — carried-forward latest-known snapshot (base currency)
             </p>
           </div>
-          <div role="group" aria-label="Chart range" className="flex items-center gap-1 overflow-x-auto">
+          <ToggleGroup
+            type="single"
+            variant="outline"
+            size="sm"
+            value={range}
+            onValueChange={(value) => value && setRange(value as JourneyRange)}
+            aria-label="Chart range"
+          >
             {RANGES.map((item) => (
-              <button
-                key={item.key}
-                type="button"
-                aria-pressed={range === item.key}
-                onClick={() => setRange(item.key)}
-                className={cn(
-                  "rounded-full px-2.5 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                  range === item.key
-                    ? "bg-primary text-primary-foreground"
-                    : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-                )}
-              >
+              <ToggleGroupItem key={item.key} value={item.key} aria-label={item.key}>
                 {item.key}
-              </button>
+              </ToggleGroupItem>
             ))}
-          </div>
+          </ToggleGroup>
         </div>
 
         {isEmpty ? (
@@ -406,14 +416,14 @@ export function JourneyChart({ history }: { history: History }) {
                        <defs>
                         <LinearGradient
                           id="journey-area-gradient"
-                          from="var(--chart-1)"
-                          to="var(--chart-1)"
+                          from={trendColor}
+                          to={trendColor}
                           fromOpacity={0.32}
                           toOpacity={0}
                         >
-                          <stop offset="0%" stopColor="var(--chart-1)" stopOpacity={0.32} />
-                          <stop offset="55%" stopColor="var(--chart-1)" stopOpacity={0.12} />
-                          <stop offset="100%" stopColor="var(--chart-1)" stopOpacity={0} />
+                          <stop offset="0%" stopColor={trendColor} stopOpacity={0.32} />
+                          <stop offset="55%" stopColor={trendColor} stopOpacity={0.12} />
+                          <stop offset="100%" stopColor={trendColor} stopOpacity={0} />
                         </LinearGradient>
                          <filter id="journey-glow" x="-50%" y="-50%" width="200%" height="200%">
                            <feGaussianBlur stdDeviation="3" result="blur1" />
@@ -464,7 +474,7 @@ export function JourneyChart({ history }: { history: History }) {
                         x={(point) => xScale(point.parsedDate)}
                         y={(point) => yScale(point.value)}
                         curve={curveLinear}
-                        stroke="var(--chart-1)"
+                        stroke={trendColor}
                          strokeWidth={2.5}
                          strokeLinecap="round"
                          strokeLinejoin="round"
@@ -478,7 +488,7 @@ export function JourneyChart({ history }: { history: History }) {
                                ref={linePathRef}
                                d={lineDRef.current || nextD}
                                fill="none"
-                               stroke="var(--chart-1)"
+                               stroke={trendColor}
                                strokeWidth={2.5}
                                strokeLinecap="round"
                                strokeLinejoin="round"
@@ -495,7 +505,7 @@ export function JourneyChart({ history }: { history: History }) {
                          const valueAnchor = clampedLabelAnchor(x, plotWidth)
                          return (
                            <g key={point.date}>
-                             <circle cx={x} cy={y} r={dense ? 3 : 5} fill="var(--chart-1)" filter={!dense ? "url(#journey-glow)" : undefined} />
+                             <circle cx={x} cy={y} r={dense ? 3 : 5} fill={trendColor} filter={!dense ? "url(#journey-glow)" : undefined} />
                              {!masked && !hasMilestoneLabel && <text x={valueAnchor.x} y={dense ? y - 10 : y - 12} textAnchor={valueAnchor.textAnchor} fill="var(--foreground)" fontSize={11} fontWeight={600}>{formatInrCompact(point.value)}</text>}
                              {!dense && <text x={x} y={y + 18} textAnchor="middle" fill="var(--muted-foreground)" fontSize={10}>{formatXLabel(point.date)}</text>}
                            </g>
@@ -514,13 +524,13 @@ export function JourneyChart({ history }: { history: History }) {
                                  cx={x}
                                  cy={y}
                                  r={4}
-                                 fill="var(--chart-1)"
+                                 fill={trendColor}
                                  opacity={0.4}
                                  filter="url(#journey-glow)"
                                  style={{ animation: "journey-pulse-ring 1.8s var(--ease-out) infinite" }}
                                />
                              )}
-                              <circle cx={x} cy={y} r={dense ? 3 : 5} fill="var(--chart-1)" filter="url(#journey-glow)" />
+                              <circle cx={x} cy={y} r={dense ? 3 : 5} fill={trendColor} filter="url(#journey-glow)" />
                               {!masked && !hasMilestoneLabel && <text x={valueAnchor.x} y={dense ? y - 10 : y - 12} textAnchor={valueAnchor.textAnchor} fill="var(--foreground)" fontSize={11} fontWeight={600}>{formatInrCompact(point.value)}</text>}
                               {!dense && <text x={x} y={y + 18} textAnchor="middle" fill="var(--muted-foreground)" fontSize={10}>{formatXLabel(point.date)}</text>}
                            </g>

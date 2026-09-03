@@ -77,7 +77,7 @@ TODAY (M8)                                    M9 (deploy)
           ▼                                            ▼
 ┌──────────────────────┐                     ┌──────────────────────┐
 │ FastAPI bridge       │                     │ Supabase             │
-│ 127.0.0.1:8000       │                     │ · PostgREST VIEWS    │
+│ 127.0.0.1:8001       │                     │ · PostgREST VIEWS    │
 │ · GET  /api/health   │                     │   (v_latest, ... —   │
 │ · POST /api/refresh  │  ──contract──►      │   SAME JSON shape)   │
 │   (pipeline snapshot │                     │ · RLS = read-only    │

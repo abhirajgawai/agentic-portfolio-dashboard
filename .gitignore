@@ -1,5 +1,11 @@
 # ---- Claude Code local state ----
 .claude/worktrees/
+.claude/.headroom_wrap_*
+
+# ---- shadcn MCP local install artifacts (repo-root, not the dashboard app) ----
+/node_modules/
+/package.json
+/package-lock.json
 
 # ---- Python / uv ----
 .venv/

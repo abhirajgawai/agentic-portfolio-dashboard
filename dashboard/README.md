@@ -7,7 +7,7 @@ DB directly. The only dynamic surface is the chat + refresh bridge.
 
 **Stack:** Vite 8 + React 19 + TypeScript (strict) · Tailwind v4 + shadcn/ui
 (dark) · Apache ECharts (modular `echarts/core`) · TanStack Query + Table ·
-Zod v4 (the contract) · FastAPI bridge (127.0.0.1:8000).
+Zod v4 (the contract) · FastAPI bridge (127.0.0.1:8001).
 
 ## Layout
 
@@ -36,7 +36,7 @@ Order matters — the dashboard is a static viewer plus a thin bridge:
 
 1. **Bridge** (terminal 1, repo root):
    ```powershell
-   uv run uvicorn portfolio.bridge:app --host 127.0.0.1 --port 8000
+   uv run uvicorn portfolio.bridge:app --host 127.0.0.1 --port 8001
    ```
    (or `uv run python -m portfolio.bridge`). Loopback only — the bridge is the
    local dev seam; M9 replaces it with Supabase.
@@ -46,7 +46,7 @@ Order matters — the dashboard is a static viewer plus a thin bridge:
    npm install      # first time
    npm run dev      # http://localhost:5173
    ```
-   Vite proxies `/api/*` → `127.0.0.1:8000`.
+   Vite proxies `/api/*` → `127.0.0.1:8001`.
 
 3. **Chat needs the agent** (optional, terminal 3, repo root):
    ```powershell

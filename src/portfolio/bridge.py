@@ -4,7 +4,8 @@ client in-process (no proxy hops).
 
 Endpoints:
 
-    GET  /api/health   -> {pipeline: {asOf, exportsPresent, exportsGeneratedAt}, agent: bool}
+    GET  /api/health   -> {pipeline: {asOf, exportsPresent, exportsGeneratedAt}, agent: bool,
+                            daemons: {zerodha: {reachable, authenticated}}}
     POST /api/refresh  -> {ok: true, summary} | 502 {ok: false, error}
     POST /api/live     -> {ok: true, holdings, asOf, platforms} | 502 {ok: false, error}
     POST /api/cas/import -> {ok: true, import, export} | 502 {ok: false, error}
@@ -25,8 +26,8 @@ Endpoints:
     POST /api/ask      -> {answer, toolCalls, turns, withinBudget} | 503
 
 Guardrails:
-    - Binds loopback only when served (127.0.0.1:8000 — uvicorn flag, and the
-      __main__ entry below hard-codes it).
+    - Binds loopback only when served (default 127.0.0.1:8001 — uvicorn flag,
+      overridable via PORTFOLIO_BRIDGE_PORT; :8000 belongs to Cardora now).
     - CORS allows the Vite dev origin; the dev proxy means the browser talks
       to the same origin anyway (CORS is belt-and-suspenders).
     - NEVER touches broker MCPs or the DB directly: refresh shells out to the
@@ -63,7 +64,8 @@ logger = logging.getLogger("portfolio.bridge")
 app = FastAPI(title="portfolio-dashboard-bridge", version="0.1.0")
 
 # The Vite dev server origin(s) the SPA is served from. /api/* is proxied by
-# Vite, so these matter only for direct cross-origin calls to :8000. Both the
+# Vite, so these matter only for direct cross-origin calls to the bridge port
+# (127.0.0.1:8001 by default). Both the
 # 5173 (original) and 5174 (current Vite default port) origins are allowed —
 # the port is not pinned, so a direct fetch from either must not be blocked.
 CORS_ORIGINS = [
@@ -121,10 +123,28 @@ def _exports_generated_at() -> str | None:
     return datetime.fromtimestamp(max(mtimes), tz=UTC).isoformat() if mtimes else None
 
 
+def _zerodha_daemon_health() -> dict:
+    """Live Zerodha session-daemon reachability (GET :8787/health, ~3s
+    timeout) - reuses snapshot.daemon_health() so the bridge's UI signal and
+    the pipeline's own daemon-readiness check never drift apart. Moomoo has no
+    equivalent: it's OpenD (a local desktop app) + a per-run MCP subprocess,
+    not a persistent server, so there's nothing cheap to ping here - its
+    status comes from the last snapshot/live-poll `runs` row instead
+    (/api/jobs/status), not this endpoint."""
+    from portfolio.snapshot import daemon_health
+
+    health = daemon_health()
+    if health is None:
+        return {"reachable": False, "authenticated": False}
+    return {"reachable": bool(health.get("ok")), "authenticated": bool(health.get("auth"))}
+
+
 @app.get("/api/health")
 async def health() -> dict:
-    """Pipeline freshness (export files) + agent reachability (M7 client)."""
+    """Pipeline freshness (export files) + agent reachability (M7 client) +
+    live Zerodha daemon reachability."""
     agent = await OpenCodeClient().health()
+    zerodha_daemon = await asyncio.to_thread(_zerodha_daemon_health)
     return {
         "pipeline": {
             "asOf": _latest_as_of(),
@@ -132,6 +152,7 @@ async def health() -> dict:
             "exportsGeneratedAt": _exports_generated_at(),
         },
         "agent": agent,
+        "daemons": {"zerodha": zerodha_daemon},
     }
 
 
@@ -1248,7 +1269,12 @@ async def ask(payload: dict) -> JSONResponse:
 
 
 if __name__ == "__main__":
+    import os
+
     import uvicorn
 
     # Loopback ONLY — the dashboard's local dev seam, never exposed.
-    uvicorn.run(app, host="127.0.0.1", port=8000, log_level="info")
+    # Default 8001: another local project (Cardora) owns :8000 since 2026-09-01.
+    # Override with PORTFOLIO_BRIDGE_PORT when needed.
+    port = int(os.environ.get("PORTFOLIO_BRIDGE_PORT", "8001"))
+    uvicorn.run(app, host="127.0.0.1", port=port, log_level="info")

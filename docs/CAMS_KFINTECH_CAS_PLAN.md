@@ -335,6 +335,10 @@ for r in conn.execute(\"SELECT platform, status, error, started_at FROM runs WHE
 
 # Scheduled task status
 powershell -ExecutionPolicy Bypass -File scripts\scheduler\list_tasks.ps1
+
+# Gmail token broken (invalid_grant) -> re-consent, then re-verify
+uv run portfolio auth --platform gmail
+uv run python -m portfolio.cli cas auto --force
 ```
 
 **IMPORTANT — do not spam live tests.** Every `cas request`/`cas auto`
@@ -462,6 +466,34 @@ that's a filesystem path, verify it resolves correctly from a *different*
 working directory than the repo root before considering the change safe —
 this class of bug is invisible when you only ever test from an interactive
 shell already sitting at the repo root.
+
+### 8.9 Google OAuth refresh token dies every ~7 days ("Testing" publishing status)
+First failure observed 2026-09-01 in the 21:40 IST `PortfolioCasAuto` task:
+the Gmail fetch step died with `RefreshError: invalid_grant: Token has been
+expired or revoked` while refreshing the stored access token. Root cause:
+the Google Cloud OAuth client was created with the consent screen in
+Google's default **Testing** publishing status, and Google hard-invalidates
+testing-mode refresh tokens after **7 days** for unverified apps (M8.10 went
+live 2026-08-24 — the first failure landed on day 8, matching the rule
+exactly). Other possible `invalid_grant` causes (user revoked the grant, a
+newer consent overwrote the stored token) were checked and don't fit the
+timing; the stored token entry itself was structurally fine.
+
+**Recovery (manual by design — guardrail #3):**
+```powershell
+uv run portfolio auth --platform gmail   # re-consent -> fresh refresh token
+```
+then re-verify the loop with `cas auto --force`.
+
+**Permanent fix:** Google Cloud Console → OAuth consent screen → change
+publishing status **Testing → In production**. Published (verified or not)
+refresh tokens do not carry the 7-day expiry; re-consent once after
+publishing.
+
+**Lesson for future agents:** an OAuth client that must survive unattended
+scheduled runs must never remain in Testing status — publish the consent
+screen at setup time, and treat a class of token-expiry failure as a
+first-run checklist item, not a surprise a week later.
 
 ---
 

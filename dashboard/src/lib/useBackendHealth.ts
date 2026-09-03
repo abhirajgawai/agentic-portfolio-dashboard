@@ -6,7 +6,7 @@
  *   - 'loading'         first poll has not resolved yet
  *   - 'online'          bridge reachable AND opencode serve reachable (agent:true)
  *   - 'agent-offline'  bridge reachable but opencode serve down (agent:false)
- *   - 'backend-offline' the bridge itself (:8000) is unreachable — the fetch threw,
+ *   - 'backend-offline' the bridge itself (:8001) is unreachable — the fetch threw,
  *                        i.e. `npm run dev:stack` (or the bridge) is not running.
  *
  * Health only distinguishes bridge-up/down via the fetch succeeding; an unreachable
@@ -21,6 +21,13 @@
  * Both are null while 'loading', when the bridge is unreachable (fetch threw),
  * or when the bridge reports no export/run yet. On an offline transition the
  * previous timestamps are dropped so stale stamps never linger.
+ *
+ * zerodhaDaemon carries the bridge's LIVE probe of the Zerodha session daemon
+ * (GET :8787/health, see bridge.py's _zerodha_daemon_health) — distinct from
+ * bridge/agent reachability: the bridge can be online while the daemon itself
+ * is down or mid-2FA. Moomoo has no persistent daemon to probe this way (see
+ * bridge.py's docstring); its status comes from the last snapshot attempt via
+ * /api/jobs/status instead (LiveJobsRow), not this hook.
  */
 
 import { useEffect, useState } from 'react'
@@ -29,12 +36,19 @@ import { getHealth } from '@/lib/api'
 
 export type BackendStatus = 'loading' | 'online' | 'agent-offline' | 'backend-offline'
 
+export interface ZerodhaDaemonState {
+  reachable: boolean
+  authenticated: boolean
+}
+
 export interface BackendHealthState {
   status: BackendStatus
   /** Newest export-file mtime from the bridge (ISO UTC), null until known. */
   exportsGeneratedAt: string | null
   /** Data run time (latest.json asOf) from the bridge, null until known. */
   asOf: string | null
+  /** Live Zerodha daemon probe; null while 'loading' or when the bridge itself is unreachable. */
+  zerodhaDaemon: ZerodhaDaemonState | null
 }
 
 export function useBackendHealth(pollMs = 10_000): BackendHealthState {
@@ -42,6 +56,7 @@ export function useBackendHealth(pollMs = 10_000): BackendHealthState {
     status: 'loading',
     exportsGeneratedAt: null,
     asOf: null,
+    zerodhaDaemon: null,
   })
 
   useEffect(() => {
@@ -54,12 +69,13 @@ export function useBackendHealth(pollMs = 10_000): BackendHealthState {
             status: h.agent ? 'online' : 'agent-offline',
             exportsGeneratedAt: h.pipeline.exportsGeneratedAt,
             asOf: h.pipeline.asOf,
+            zerodhaDaemon: h.daemons.zerodha,
           })
         }
       } catch {
-        // fetch failed entirely => bridge (:8000) not reachable
+        // fetch failed entirely => bridge (:8001) not reachable
         if (alive) {
-          setState({ status: 'backend-offline', exportsGeneratedAt: null, asOf: null })
+          setState({ status: 'backend-offline', exportsGeneratedAt: null, asOf: null, zerodhaDaemon: null })
         }
       }
     }

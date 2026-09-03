@@ -8,7 +8,7 @@
  * exportsGeneratedAt stamp advances, exactly like a scheduled export landing.
  *
  * Precondition (see playwright.config.ts — no webServer): Vite is already on
- * :5174 AND the bridge is already on :8000 (the dashboard/proxy must be up).
+ * :5174 AND the bridge is already on :8001 (the dashboard/proxy must be up).
  */
 
 import path from 'node:path'

@@ -1,6 +1,6 @@
 /**
  * Bridge HTTP client — talks to the local FastAPI bridge through the Vite
- * dev proxy (/api/* -> 127.0.0.1:8000). In M9 these calls move to Supabase
+ * dev proxy (/api/* -> 127.0.0.1:8001). In M9 these calls move to Supabase
  * (edge function / PostgREST) with the same response shapes.
  */
 
