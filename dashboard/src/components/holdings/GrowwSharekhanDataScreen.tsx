@@ -16,23 +16,19 @@
 
 import { CasImportScreen } from '@/components/cas/CasImportScreen'
 import { ManualEquitiesScreen } from '@/components/holdings/ManualEquitiesScreen'
+import { PageHeader } from '@/components/layout/PageHeader'
 
 export function GrowwSharekhanDataScreen() {
   return (
-    <div className="space-y-10">
-      <div>
-        <h1 className="text-2xl font-semibold">Groww / Sharekhan Data</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Everything for keeping Groww and Sharekhan holdings current — automated
-          mutual fund import below, manual equity values further down.
-        </p>
-      </div>
+    <div className="space-y-4">
+      <PageHeader
+        title="Groww / Sharekhan Data"
+        subtitle="Everything for keeping Groww and Sharekhan holdings current — automated mutual fund import below, manual equity values further down."
+      />
 
       <CasImportScreen />
 
-      <div className="border-t pt-8">
-        <ManualEquitiesScreen />
-      </div>
+      <ManualEquitiesScreen />
     </div>
   )
 }

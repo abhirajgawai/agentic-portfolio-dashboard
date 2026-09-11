@@ -172,13 +172,12 @@ function PlatformCard({ platform, label }: { platform: Platform; label: string }
 
 export function ManualEquitiesScreen() {
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold">Manual Equities</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Groww and Sharekhan equities — hand-entered total value, no per-share
-          breakdown (neither broker exposes an API/MCP). Update whenever you
-          check the broker app.
+    <div className="space-y-4">
+      <div className="space-y-2">
+        <h2 className="text-lg font-semibold">Manual Equities</h2>
+        <p className="text-sm text-muted-foreground">
+          Hand-entered total value per platform — no per-share breakdown (neither
+          broker exposes an API/MCP). Update whenever you check the broker app.
         </p>
       </div>
 
