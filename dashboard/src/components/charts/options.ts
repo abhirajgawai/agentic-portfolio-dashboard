@@ -403,6 +403,70 @@ export function attributionBarsOption(opts: {
 }
 
 /**
+ * Categorical horizontal bars — one bar per category (e.g. platform), colored
+ * by a caller-supplied palette (not by sign, unlike attributionBarsOption
+ * above — every value here is a positive ₹ holding, not a gain/loss). Used by
+ * Allocation's "Platform breakdown" card (design brief §3.2) to give the
+ * per-platform % donuts a companion absolute-₹ view.
+ */
+export function categoryValueBarsOption(opts: {
+  labels: string[]
+  values: number[]
+  colors: string[]
+  formatter?: (value: number) => string
+  masked?: boolean
+}): EChartsOption {
+  const fmt = opts.formatter ?? ((v: number) => String(v))
+  const valueFmt = (v: number) => (opts.masked ? MASK_TEXT : fmt(v))
+  return {
+    backgroundColor: 'transparent',
+    textStyle: baseTextStyle,
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'shadow' },
+      backgroundColor: 'rgba(20,20,24,0.92)',
+      borderColor: 'rgba(255,255,255,0.1)',
+      textStyle: { color: '#e8e8ea' },
+      valueFormatter: (v: unknown) => valueFmt(typeof v === 'number' ? v : 0),
+    },
+    grid: { left: 8, right: 56, top: 8, bottom: 8, containLabel: true },
+    xAxis: {
+      type: 'value',
+      axisLabel: { color: CHART_TEXT, fontSize: 11, formatter: (v: number) => valueFmt(v) },
+      splitLine: { lineStyle: { color: AXIS_LINE } },
+    },
+    yAxis: {
+      type: 'category',
+      data: opts.labels,
+      axisLabel: { color: CHART_TEXT, fontSize: 11 },
+      axisLine: { lineStyle: { color: AXIS_LINE } },
+      axisTick: { show: false },
+    },
+    series: [
+      {
+        name: 'Value',
+        type: 'bar',
+        data: opts.values.map((v, i) => ({
+          value: v,
+          itemStyle: { color: opts.colors[i % opts.colors.length], borderRadius: 3 },
+        })),
+        barMaxWidth: 22,
+        label: opts.masked
+          ? { show: false }
+          : {
+              show: true,
+              position: 'right' as const,
+              fontSize: 11,
+              fontWeight: 600 as const,
+              color: CHART_TEXT,
+              formatter: (p) => fmt(Number(p.value)),
+            },
+      },
+    ],
+  }
+}
+
+/**
  * Resolve the theme-aware chart palette from the CSS custom properties
  * (--chart-1..9) set on :root / .dark in index.css. Falls back to the
  * hardcoded CATEGORY_COLORS if the vars aren't present (e.g. SSR).

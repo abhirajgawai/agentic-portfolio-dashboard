@@ -1,9 +1,14 @@
-/** Allocation workspace — four donut charts + portfolio trend chart +
- *  Top Gainers / Top Losers from today's performance. */
+/** Allocation workspace — "where is my money, and is that healthy" (design
+ *  brief §3.2): geography/platform/asset-class breakdown donuts + a
+ *  platform-value bars card, portfolio trend chart, today's biggest movers,
+ *  and the promoted full Account roads breakdown (moved from Journey's
+ *  cramped 340px sidebar rail — it's fundamentally an allocation question). */
 
+import { AccountRoads } from '@/components/journey/AccountRoads'
 import { AllocationDonuts } from '@/components/overview/AllocationDonuts'
 import { TrendChart } from '@/components/overview/TrendChart'
 import { ErrorState, LoadingState } from '@/components/layout/states'
+import { PageHeader } from '@/components/layout/PageHeader'
 import { useLatest, useHistory, usePerformance } from '@/lib/data'
 import { formatInrCompact, formatPct } from '@/lib/format'
 import { usePrivacy } from '@/lib/privacy'
@@ -110,16 +115,14 @@ export function AllocationScreen() {
 
   return (
     <div className="space-y-4">
-      <div>
-        <h1 className="text-2xl font-semibold">Allocation</h1>
-        <p className="text-sm text-muted-foreground">
-          Portfolio composition by asset class and platform, plus today's
-          biggest movers.
-        </p>
-      </div>
-      <AllocationDonuts allocation={latest.data.allocation} />
+      <PageHeader
+        title="Allocation"
+        subtitle="Portfolio composition by geography, platform, and asset class, plus today's biggest movers."
+      />
+      <AllocationDonuts allocation={latest.data.allocation} holdings={latest.data.holdings} />
       <TrendChart history={history.data} />
       <TopMoversSection perf={perf.data} />
+      <AccountRoads history={history.data} variant="full" />
     </div>
   )
 }
