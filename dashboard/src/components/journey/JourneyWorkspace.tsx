@@ -160,7 +160,10 @@ export function JourneyWorkspace({
         />
       </motion.div>
 
-      {/* Chart (left, wide) + condensed rail (right, ~340px) */}
+      {/* Chart (left, wide) + condensed rail (right, ~340px) — the rail only
+       *  carries the two "right now" cards (today's move, account snapshot),
+       *  so its height stays proportionate to the chart beside it instead of
+       *  towering over it. */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_340px]">
         <motion.div variants={item} className="min-w-0 space-y-4">
           <JourneyChart history={history.data} />
@@ -169,10 +172,17 @@ export function JourneyWorkspace({
         <motion.div variants={item} className="space-y-4">
           <TodayPanel latest={latest.data} alerts={alerts.data} />
           <AccountRoads history={history.data} variant="condensed" />
-          <GoalMilestones valueBase={latest.data.totals.valueBase} />
-          <MilestoneJournal history={history.data} />
         </motion.div>
       </div>
+
+      {/* Goals + journal — promoted to a full-width row below the chart/rail
+       *  split (rather than stacked in the narrow rail) so they use the same
+       *  width the chart does, and so the page doesn't end in ~944px of dead
+       *  ivory below a short right rail. */}
+      <motion.div variants={item} className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <GoalMilestones valueBase={latest.data.totals.valueBase} />
+        <MilestoneJournal history={history.data} />
+      </motion.div>
     </motion.section>
   );
 }

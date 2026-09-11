@@ -9,11 +9,31 @@ import type { EChartsOption } from 'echarts'
 
 import { MASK_TEXT } from '@/lib/format'
 
-/** Muted foreground — matches --muted-foreground so charts blend with the UI. */
-export const CHART_TEXT = '#9b9ba3'
-export const AXIS_LINE = 'rgba(255,255,255,0.08)'
+/**
+ * Theme-resolved chart colors. Charts render to a <canvas>, which can't
+ * resolve `var(--foo)` the way DOM elements can, so these read the CURRENT
+ * computed CSS custom property off `:root`/`.dark` (see resolveThemeColor()
+ * below) each time an option builder runs — never hardcode a hex/rgba here.
+ * Fallbacks match this repo's light-mode tokens (index.css `:root`).
+ */
+function chartText(): string {
+  return resolveThemeColor('--muted-foreground', 'oklch(0.48 0.02 60)')
+}
+function axisLine(): string {
+  return resolveThemeColor('--border', 'oklch(0.9 0.014 70)')
+}
+function tooltipTheme(): { backgroundColor: string; borderColor: string; textStyle: { color: string } } {
+  return {
+    backgroundColor: resolveThemeColor('--card', '#ffffff'),
+    borderColor: resolveThemeColor('--border', 'oklch(0.9 0.014 70)'),
+    textStyle: { color: resolveThemeColor('--foreground', 'oklch(0.22 0.018 58)') },
+  }
+}
 
-/** Categorical palette (mirrors the --chart-* tokens in index.css). */
+/** Categorical palette (mirrors the --chart-* tokens in index.css) — the
+ *  static-import-time fallback for canvas gradients/series colors. Theme-aware
+ *  callers should prefer getChartPalette(), which resolves the live --chart-N
+ *  custom properties. */
 export const CATEGORY_COLORS = [
   '#6f7cff', // chart-1 indigo
   '#63d6a5', // chart-2 green
@@ -30,8 +50,6 @@ export const CATEGORY_COLORS = [
 export const GAIN = '#63d6a5'
 export const LOSS = '#d0655e'
 
-const baseTextStyle = { color: CHART_TEXT, fontFamily: 'inherit' }
-
 /** Value-over-time area chart (portfolio total + geography lines). */
 export function trendAreaOption(opts: {
   dates: string[]
@@ -44,18 +62,21 @@ export function trendAreaOption(opts: {
    *  the chart, not off a hover tooltip). Caller gates this on point count —
    *  labels collide once there are more than a handful of points. */
   showLabels?: boolean
+  /** Per-series colors, in `series` order. Defaults to the resolved
+   *  `--chart-1..9` palette (getChartPalette()) rather than the hardcoded
+   *  CATEGORY_COLORS fallback, so this stays token-consistent with every
+   *  other themed chart on the page. */
+  colors?: string[]
 }): EChartsOption {
   const fmt = opts.formatter ?? ((v: number) => String(v))
   const valueFmt = (v: number) => (opts.masked ? MASK_TEXT : fmt(v))
   return {
     backgroundColor: 'transparent',
-    textStyle: baseTextStyle,
-    color: CATEGORY_COLORS,
+    textStyle: { color: chartText(), fontFamily: 'inherit' },
+    color: opts.colors ?? getChartPalette(),
     tooltip: {
       trigger: 'axis',
-      backgroundColor: 'rgba(20,20,24,0.92)',
-      borderColor: 'rgba(255,255,255,0.1)',
-      textStyle: { color: '#e8e8ea' },
+      ...tooltipTheme(),
       valueFormatter: (v: unknown) => valueFmt(typeof v === 'number' ? v : 0),
     },
     grid: { left: 8, right: 8, top: 28, bottom: 4, containLabel: true },
@@ -63,18 +84,18 @@ export function trendAreaOption(opts: {
       type: 'category',
       boundaryGap: false,
       data: opts.dates.map((d) => d.slice(5)), // MM-DD tick labels
-      axisLine: { lineStyle: { color: AXIS_LINE } },
-      axisLabel: { color: CHART_TEXT, fontSize: 11 },
+      axisLine: { lineStyle: { color: axisLine() } },
+      axisLabel: { color: chartText(), fontSize: 11 },
       axisTick: { show: false },
     },
     yAxis: {
       type: 'value',
       axisLabel: {
-        color: CHART_TEXT,
+        color: chartText(),
         fontSize: 11,
         formatter: (v: number) => valueFmt(v),
       },
-      splitLine: { lineStyle: { color: AXIS_LINE } },
+      splitLine: { lineStyle: { color: axisLine() } },
     },
     legend: {
       top: 0,
@@ -82,7 +103,7 @@ export function trendAreaOption(opts: {
       itemWidth: 10,
       itemHeight: 10,
       icon: 'circle',
-      textStyle: { color: CHART_TEXT, fontSize: 11 },
+      textStyle: { color: chartText(), fontSize: 11 },
     },
     series: opts.series.map((s, i) => ({
       name: s.name,
@@ -103,7 +124,7 @@ export function trendAreaOption(opts: {
               position: 'top' as const,
               fontSize: 11,
               fontWeight: 600 as const,
-              color: CHART_TEXT,
+              color: chartText(),
               formatter: (p: { value: number }) => fmt(p.value),
             }
           : { show: false },
@@ -126,24 +147,38 @@ export function dayChangeBarOption(opts: {
 }): EChartsOption {
   const fmt = opts.formatter ?? ((v: number) => String(v))
   const valueFmt = (v: number) => (opts.masked ? MASK_TEXT : fmt(v))
+  // Sign-preserving cube-root compression: one outlier day (e.g. a big lump
+  // sum) would otherwise dwarf the axis and flatten every other bar to ~0px,
+  // making the strip convey nothing. This keeps every bar visually legible
+  // regardless of magnitude while preserving relative order. The bar height
+  // is compressed; the REAL ₹ value still drives the tooltip and the on-bar
+  // label via opts.changes[dataIndex] below, never the compressed number.
+  const compress = (v: number) => Math.sign(v) * Math.cbrt(Math.abs(v))
   return {
     backgroundColor: 'transparent',
-    textStyle: baseTextStyle,
+    textStyle: { color: chartText(), fontFamily: 'inherit' },
     tooltip: {
       trigger: 'axis',
       axisPointer: { type: 'shadow' },
-      backgroundColor: 'rgba(20,20,24,0.92)',
-      borderColor: 'rgba(255,255,255,0.1)',
-      textStyle: { color: '#e8e8ea' },
-      valueFormatter: (v: unknown) => valueFmt(typeof v === 'number' ? v : 0),
+      ...tooltipTheme(),
+      formatter: (params: unknown) => {
+        const list = Array.isArray(params) ? params : [params]
+        return list
+          .map((p) => {
+            const idx = (p as { dataIndex: number }).dataIndex
+            const v = opts.changes[idx] ?? 0
+            return `${opts.dates[idx] ?? ''}: ${v >= 0 ? '+' : ''}${valueFmt(v)}`
+          })
+          .join('<br/>')
+      },
     },
     grid: { left: 8, right: 8, top: 24, bottom: 4, containLabel: true },
     xAxis: {
       type: 'category',
       boundaryGap: true,
       data: opts.dates.map((d) => d.slice(5)),
-      axisLine: { lineStyle: { color: AXIS_LINE } },
-      axisLabel: { color: CHART_TEXT, fontSize: 10 },
+      axisLine: { lineStyle: { color: axisLine() } },
+      axisLabel: { color: chartText(), fontSize: 10 },
       axisTick: { show: false },
     },
     yAxis: { type: 'value', show: false },
@@ -152,7 +187,7 @@ export function dayChangeBarOption(opts: {
         name: 'Day change',
         type: 'bar',
         data: opts.changes.map((v) => ({
-          value: v,
+          value: compress(v),
           itemStyle: { color: v >= 0 ? GAIN : LOSS, borderRadius: 3 },
         })),
         barMaxWidth: 40,
@@ -163,8 +198,11 @@ export function dayChangeBarOption(opts: {
               position: 'top' as const,
               fontSize: 10,
               fontWeight: 600 as const,
-              color: CHART_TEXT,
-              formatter: (p: { value: number }) => `${p.value >= 0 ? '+' : ''}${fmt(p.value)}`,
+              color: chartText(),
+              formatter: (p: { dataIndex: number }) => {
+                const v = opts.changes[p.dataIndex] ?? 0
+                return `${v >= 0 ? '+' : ''}${fmt(v)}`
+              },
             },
       },
     ],
@@ -178,26 +216,24 @@ export function returnBarsOption(opts: {
 }): EChartsOption {
   return {
     backgroundColor: 'transparent',
-    textStyle: baseTextStyle,
+    textStyle: { color: chartText(), fontFamily: 'inherit' },
     tooltip: {
       trigger: 'axis',
       axisPointer: { type: 'shadow' },
-      backgroundColor: 'rgba(20,20,24,0.92)',
-      borderColor: 'rgba(255,255,255,0.1)',
-      textStyle: { color: '#e8e8ea' },
+      ...tooltipTheme(),
       valueFormatter: (v: unknown) => `${typeof v === 'number' ? v.toFixed(2) : v}%`,
     },
     grid: { left: 8, right: 16, top: 8, bottom: 8, containLabel: true },
     xAxis: {
       type: 'value',
-      axisLabel: { color: CHART_TEXT, fontSize: 11, formatter: '{value}%' },
-      splitLine: { lineStyle: { color: AXIS_LINE } },
+      axisLabel: { color: chartText(), fontSize: 11, formatter: '{value}%' },
+      splitLine: { lineStyle: { color: axisLine() } },
     },
     yAxis: {
       type: 'category',
       data: opts.labels,
-      axisLabel: { color: CHART_TEXT, fontSize: 10 },
-      axisLine: { lineStyle: { color: AXIS_LINE } },
+      axisLabel: { color: chartText(), fontSize: 10 },
+      axisLine: { lineStyle: { color: axisLine() } },
       axisTick: { show: false },
     },
     series: [
@@ -232,12 +268,10 @@ export function dailyPerformanceOption(opts: {
   const valueFmt = (v: number) => (opts.masked ? MASK_TEXT : fmt(v))
   return {
     backgroundColor: 'transparent',
-    textStyle: baseTextStyle,
+    textStyle: { color: chartText(), fontFamily: 'inherit' },
     tooltip: {
       trigger: 'axis',
-      backgroundColor: 'rgba(20,20,24,0.92)',
-      borderColor: 'rgba(255,255,255,0.1)',
-      textStyle: { color: '#e8e8ea' },
+      ...tooltipTheme(),
       valueFormatter: (v: unknown) => valueFmt(typeof v === 'number' ? v : 0),
     },
     grid: { left: 8, right: 8, top: 28, bottom: 4, containLabel: true },
@@ -245,23 +279,23 @@ export function dailyPerformanceOption(opts: {
       type: 'category',
       boundaryGap: true, // bars sit between ticks
       data: opts.dates.map((d) => d.slice(5)), // MM-DD tick labels
-      axisLine: { lineStyle: { color: AXIS_LINE } },
-      axisLabel: { color: CHART_TEXT, fontSize: 11 },
+      axisLine: { lineStyle: { color: axisLine() } },
+      axisLabel: { color: chartText(), fontSize: 11 },
       axisTick: { show: false },
     },
     yAxis: [
       {
         type: 'value',
         name: 'Day P&L',
-        nameTextStyle: { color: CHART_TEXT, fontSize: 10 },
-        axisLabel: { color: CHART_TEXT, fontSize: 11, formatter: (v: number) => valueFmt(v) },
-        splitLine: { lineStyle: { color: AXIS_LINE } },
+        nameTextStyle: { color: chartText(), fontSize: 10 },
+        axisLabel: { color: chartText(), fontSize: 11, formatter: (v: number) => valueFmt(v) },
+        splitLine: { lineStyle: { color: axisLine() } },
       },
       {
         type: 'value',
         name: 'Value',
-        nameTextStyle: { color: CHART_TEXT, fontSize: 10 },
-        axisLabel: { color: CHART_TEXT, fontSize: 11, formatter: (v: number) => valueFmt(v) },
+        nameTextStyle: { color: chartText(), fontSize: 10 },
+        axisLabel: { color: chartText(), fontSize: 11, formatter: (v: number) => valueFmt(v) },
         splitLine: { show: false },
       },
     ],
@@ -271,7 +305,7 @@ export function dailyPerformanceOption(opts: {
       itemWidth: 10,
       itemHeight: 10,
       icon: 'circle',
-      textStyle: { color: CHART_TEXT, fontSize: 11 },
+      textStyle: { color: chartText(), fontSize: 11 },
     },
     series: [
       {
@@ -312,13 +346,11 @@ export function simpleReturnLineOption(opts: {
 }): EChartsOption {
   return {
     backgroundColor: 'transparent',
-    textStyle: baseTextStyle,
+    textStyle: { color: chartText(), fontFamily: 'inherit' },
     color: [CATEGORY_COLORS[2] ?? '#e2b93d'],
     tooltip: {
       trigger: 'axis',
-      backgroundColor: 'rgba(20,20,24,0.92)',
-      borderColor: 'rgba(255,255,255,0.1)',
-      textStyle: { color: '#e8e8ea' },
+      ...tooltipTheme(),
       valueFormatter: (v: unknown) => (typeof v === 'number' ? `${v.toFixed(2)}%` : '—'),
     },
     grid: { left: 8, right: 8, top: 28, bottom: 4, containLabel: true },
@@ -326,14 +358,14 @@ export function simpleReturnLineOption(opts: {
       type: 'category',
       boundaryGap: false,
       data: opts.dates.map((d) => d.slice(5)),
-      axisLine: { lineStyle: { color: AXIS_LINE } },
-      axisLabel: { color: CHART_TEXT, fontSize: 11 },
+      axisLine: { lineStyle: { color: axisLine() } },
+      axisLabel: { color: chartText(), fontSize: 11 },
       axisTick: { show: false },
     },
     yAxis: {
       type: 'value',
-      axisLabel: { color: CHART_TEXT, fontSize: 11, formatter: '{value}%' },
-      splitLine: { lineStyle: { color: AXIS_LINE } },
+      axisLabel: { color: chartText(), fontSize: 11, formatter: '{value}%' },
+      splitLine: { lineStyle: { color: axisLine() } },
     },
     series: [
       {
@@ -366,26 +398,24 @@ export function attributionBarsOption(opts: {
   const valueFmt = (v: number) => (opts.masked ? MASK_TEXT : fmt(v))
   return {
     backgroundColor: 'transparent',
-    textStyle: baseTextStyle,
+    textStyle: { color: chartText(), fontFamily: 'inherit' },
     tooltip: {
       trigger: 'axis',
       axisPointer: { type: 'shadow' },
-      backgroundColor: 'rgba(20,20,24,0.92)',
-      borderColor: 'rgba(255,255,255,0.1)',
-      textStyle: { color: '#e8e8ea' },
+      ...tooltipTheme(),
       valueFormatter: (v: unknown) => valueFmt(typeof v === 'number' ? v : 0),
     },
     grid: { left: 8, right: 16, top: 8, bottom: 8, containLabel: true },
     xAxis: {
       type: 'value',
-      axisLabel: { color: CHART_TEXT, fontSize: 11, formatter: (v: number) => valueFmt(v) },
-      splitLine: { lineStyle: { color: AXIS_LINE } },
+      axisLabel: { color: chartText(), fontSize: 11, formatter: (v: number) => valueFmt(v) },
+      splitLine: { lineStyle: { color: axisLine() } },
     },
     yAxis: {
       type: 'category',
       data: opts.labels,
-      axisLabel: { color: CHART_TEXT, fontSize: 10 },
-      axisLine: { lineStyle: { color: AXIS_LINE } },
+      axisLabel: { color: chartText(), fontSize: 10 },
+      axisLine: { lineStyle: { color: axisLine() } },
       axisTick: { show: false },
     },
     series: [
@@ -420,26 +450,24 @@ export function categoryValueBarsOption(opts: {
   const valueFmt = (v: number) => (opts.masked ? MASK_TEXT : fmt(v))
   return {
     backgroundColor: 'transparent',
-    textStyle: baseTextStyle,
+    textStyle: { color: chartText(), fontFamily: 'inherit' },
     tooltip: {
       trigger: 'axis',
       axisPointer: { type: 'shadow' },
-      backgroundColor: 'rgba(20,20,24,0.92)',
-      borderColor: 'rgba(255,255,255,0.1)',
-      textStyle: { color: '#e8e8ea' },
+      ...tooltipTheme(),
       valueFormatter: (v: unknown) => valueFmt(typeof v === 'number' ? v : 0),
     },
     grid: { left: 8, right: 56, top: 8, bottom: 8, containLabel: true },
     xAxis: {
       type: 'value',
-      axisLabel: { color: CHART_TEXT, fontSize: 11, formatter: (v: number) => valueFmt(v) },
-      splitLine: { lineStyle: { color: AXIS_LINE } },
+      axisLabel: { color: chartText(), fontSize: 11, formatter: (v: number) => valueFmt(v) },
+      splitLine: { lineStyle: { color: axisLine() } },
     },
     yAxis: {
       type: 'category',
       data: opts.labels,
-      axisLabel: { color: CHART_TEXT, fontSize: 11 },
-      axisLine: { lineStyle: { color: AXIS_LINE } },
+      axisLabel: { color: chartText(), fontSize: 11 },
+      axisLine: { lineStyle: { color: axisLine() } },
       axisTick: { show: false },
     },
     series: [
@@ -458,7 +486,7 @@ export function categoryValueBarsOption(opts: {
               position: 'right' as const,
               fontSize: 11,
               fontWeight: 600 as const,
-              color: CHART_TEXT,
+              color: chartText(),
               formatter: (p) => fmt(Number(p.value)),
             },
       },
@@ -488,12 +516,10 @@ export function donutOption(opts: {
 }): EChartsOption {
   return {
     backgroundColor: 'transparent',
-    textStyle: baseTextStyle,
+    textStyle: { color: chartText(), fontFamily: 'inherit' },
     tooltip: {
       trigger: 'item',
-      backgroundColor: 'rgba(20,20,24,0.92)',
-      borderColor: 'rgba(255,255,255,0.1)',
-      textStyle: { color: '#e8e8ea' },
+      ...tooltipTheme(),
       formatter: (p: unknown) => {
         const { name, percent } = p as { name: string; percent: number }
         return opts.masked ? `${name}: ${MASK_TEXT}` : `${name}: ${percent}%`

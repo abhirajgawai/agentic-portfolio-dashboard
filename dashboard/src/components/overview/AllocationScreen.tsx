@@ -9,6 +9,7 @@ import { AllocationDonuts } from '@/components/overview/AllocationDonuts'
 import { TrendChart } from '@/components/overview/TrendChart'
 import { ErrorState, LoadingState } from '@/components/layout/states'
 import { PageHeader } from '@/components/layout/PageHeader'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { useLatest, useHistory, usePerformance } from '@/lib/data'
 import { formatInrCompact, formatPct } from '@/lib/format'
 import { usePrivacy } from '@/lib/privacy'
@@ -67,26 +68,30 @@ function TopMoversSection({ perf }: { perf: ReturnType<typeof usePerformance>['d
   return (
     <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
       {gainers.length > 0 && (
-        <div className="rounded-lg border border-gain/30 bg-gain/5 p-3">
-          <h3 className="text-xs font-semibold text-gain uppercase tracking-wider mb-2 flex items-center gap-1.5">
-            <svg className="size-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M18 15l-6-6-6 6" />
-            </svg>
-            Top Gainers ({gainers.length})
-          </h3>
-          {renderMovers(gainers, true)}
-        </div>
+        <Card className="shadow-sm">
+          <CardHeader className="pb-1">
+            <CardTitle className="flex items-center gap-1.5 text-gain">
+              <svg className="size-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M18 15l-6-6-6 6" />
+              </svg>
+              Top gainers ({gainers.length})
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="pt-0">{renderMovers(gainers, true)}</CardContent>
+        </Card>
       )}
       {losers.length > 0 && (
-        <div className="rounded-lg border border-loss/30 bg-loss/5 p-3">
-          <h3 className="text-xs font-semibold text-loss uppercase tracking-wider mb-2 flex items-center gap-1.5">
-            <svg className="size-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M6 9l6 6 6-6" />
-            </svg>
-            Top Losers ({losers.length})
-          </h3>
-          {renderMovers(losers, false)}
-        </div>
+        <Card className="shadow-sm">
+          <CardHeader className="pb-1">
+            <CardTitle className="flex items-center gap-1.5 text-loss">
+              <svg className="size-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M6 9l6 6 6-6" />
+              </svg>
+              Top losers ({losers.length})
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="pt-0">{renderMovers(losers, false)}</CardContent>
+        </Card>
       )}
     </div>
   )

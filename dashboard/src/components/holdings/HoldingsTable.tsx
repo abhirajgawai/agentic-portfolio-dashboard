@@ -39,6 +39,30 @@ const columnHelper = createColumnHelper<Holding>()
 /** Columns whose header + cells right-align (numeric columns, Ledger Gold pattern). */
 const RIGHT_ALIGN_COLS = new Set(['qty', 'avgPrice', 'ltp', 'value', 'dayChangePct', 'returnPct'])
 
+/**
+ * Fixed per-column widths (`table-layout: fixed` + a matching <colgroup> —
+ * see the render below). Without this the browser's auto table layout gives
+ * every column room to fit its longest cell, which is how the default 8-
+ * column desktop table ends up wider than its card (scrollWidth > clientWidth
+ * at 1512px with no visible scroll affordance — QA I6). Fixed widths make the
+ * `truncate` classes on Instrument/Name actually truncate (auto layout can't
+ * truncate a column with no definite width) and keep the whole row inside the
+ * card at common desktop widths. Any column absent from this map (Instrument,
+ * Name) gets the leftover space. `min-content` columns still overflow at very
+ * narrow widths — the wrapping div's `overflow-auto` remains the safety net
+ * there (e.g. tablet widths with the sparkline column on).
+ */
+const COLUMN_WIDTH: Record<string, string> = {
+  ticker: '84px',
+  qty: '80px',
+  avgPrice: '108px',
+  ltp: '96px',
+  value: '128px',
+  dayChangePct: '76px',
+  sparkline: '120px',
+  returnPct: '84px',
+}
+
 function PctCell({ value, align = 'right' }: { value: number | null; align?: 'right' | 'left' }) {
   if (value === null) return <span className="text-muted-foreground">—</span>
   const cls = value > 0 ? 'text-gain' : value < 0 ? 'text-loss' : 'text-muted-foreground'
@@ -485,7 +509,15 @@ const HoldingsTableInner = memo(function HoldingsTableInner({
         </div>
       )}
       <div className="max-h-[70vh] overflow-auto">
-        <table className="w-full text-left text-sm">
+        <table className="w-full table-fixed text-left text-sm">
+          <colgroup>
+            {(table.getHeaderGroups()[0]?.headers ?? []).map((header) => (
+              <col
+                key={header.id}
+                style={COLUMN_WIDTH[header.column.id] ? { width: COLUMN_WIDTH[header.column.id] } : undefined}
+              />
+            ))}
+          </colgroup>
           <thead className="sticky top-0 z-10">
             {table.getHeaderGroups().map((hg) => (
               <tr key={hg.id} className="border-b bg-muted/90 backdrop-blur">

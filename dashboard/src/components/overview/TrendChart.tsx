@@ -4,8 +4,8 @@
 import { useMemo } from 'react'
 
 import { EChart } from '@/components/charts/EChart'
-import { trendAreaOption, dayChangeBarOption } from '@/components/charts/options'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { dayChangeBarOption, getChartPalette, resolveThemeColor, trendAreaOption } from '@/components/charts/options'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { formatInrCompact } from '@/lib/format'
 import { usePrivacy } from '@/lib/privacy'
 import type { History } from '@/types/contract'
@@ -23,6 +23,13 @@ export function TrendChart({ history }: { history: History }) {
       name: geo,
       data: values,
     }))
+    // Lead with the Ledger Gold accent (same token JourneyChart uses) for the
+    // primary Portfolio series — the one with the area fill — so the wash
+    // reads gold, not a stray saturated blue. Geography breakout lines still
+    // use the sanctioned --chart-1..9 categorical palette (tokens.md leaves
+    // that untouched), resolved via getChartPalette() rather than a
+    // hardcoded hex array.
+    const colors = [resolveThemeColor('--chart-journey', 'oklch(0.56 0.135 65)'), ...getChartPalette()]
     return trendAreaOption({
       dates: history.dates,
       series: [
@@ -32,6 +39,7 @@ export function TrendChart({ history }: { history: History }) {
       formatter: (v) => formatInrCompact(v),
       masked,
       showLabels: history.dates.length <= LABEL_MAX_POINTS,
+      colors,
     })
   }, [history, masked])
 
@@ -48,11 +56,10 @@ export function TrendChart({ history }: { history: History }) {
   }, [history, masked])
 
   return (
-    <Card>
+    <Card className="shadow-sm">
       <CardHeader className="pb-1">
-        <CardTitle className="text-xs text-muted-foreground">
-          Portfolio value over time (EOD ledger, base currency)
-        </CardTitle>
+        <CardTitle>Portfolio value over time</CardTitle>
+        <CardDescription>EOD ledger, base currency</CardDescription>
       </CardHeader>
       <CardContent>
         {history.dates.length === 0 ? (

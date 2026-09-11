@@ -81,7 +81,7 @@ function MiniSpark({ values, color }: { values: number[]; color: string }) {
   )
 }
 
-function RoadRowItem({ row }: { row: RoadRow }) {
+function RoadRowItem({ row, variant }: { row: RoadRow; variant: 'condensed' | 'full' }) {
   const { masked } = usePrivacy()
   const color = PLATFORM_COLORS[row.platform] ?? 'var(--chart-1)'
   const Icon = row.delta > 0 ? TrendingUp : row.delta < 0 ? TrendingDown : Minus
@@ -90,8 +90,14 @@ function RoadRowItem({ row }: { row: RoadRow }) {
   return (
     <div className="flex items-center gap-3 py-2.5 border-b border-border/50 last:border-0">
       <span className="size-2 rounded-full shrink-0" style={{ backgroundColor: color }} />
-      <span className="text-sm font-medium min-w-0 flex-1 truncate">{platformLabel(row.platform)}</span>
-      <MiniSpark values={row.values} color={color} />
+      <span className="text-sm font-medium min-w-0 flex-1 truncate" title={platformLabel(row.platform)}>
+        {platformLabel(row.platform)}
+      </span>
+      {/* The condensed rail (Journey's 340px right column) doesn't have room
+       *  for dot + sparkline + value + delta + a readable label — the label
+       *  is the one thing that can't be dropped, so the sparkline goes
+       *  instead. The `full` variant (Allocation's own section) keeps it. */}
+      {variant === 'full' && <MiniSpark values={row.values} color={color} />}
       <span className="text-sm font-semibold tabular-nums text-right min-w-[92px]">
         {masked ? MASK_TEXT : formatInrCompact(row.current)}
       </span>
@@ -140,7 +146,7 @@ export function AccountRoads({ history, variant = 'full' }: AccountRoadsProps) {
         ) : (
           <div>
             {visibleRows.map((row) => (
-              <RoadRowItem key={row.platform} row={row} />
+              <RoadRowItem key={row.platform} row={row} variant={variant} />
             ))}
           </div>
         )}
