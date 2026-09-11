@@ -569,3 +569,230 @@ app, without trusting a diff or self-report.
   redesign reuses data already fetched today) — if implementation reveals one is
   genuinely needed, do not edit `contract.ts` unattended (Global Constraints);
   note it here instead and skip that specific sub-feature.
+
+---
+
+## QA findings
+
+Task 7 full-app QA pass, `redesign/ledger-gold` @ `1316daf`, 2026-09-12.
+Reviewer: `dashboard-design-reviewer`. Light mode only (dark mode is an
+explicit out-of-scope fast-follow per §1 / `tokens.md`). No mockup screenshots
+survived the session, so Journey/Allocation/Portfolio were judged against the
+design brief's *stated intent* rather than a pixel reference.
+
+### Verification suite
+
+| Command | Result |
+|---|---|
+| `npm run typecheck` | **PASS (no regression)** — exactly 11 errors, identical by file to the known pre-existing baseline: 2 × `charts/options.ts`, 1 × `segments/SegmentBreakdown.tsx`, 6 × `segments/SegmentsScreen.tsx`, 2 × `ui/chart-legend.tsx`. |
+| `npm run lint` (oxlint) | **PASS**, exit 0, pre-existing warnings only |
+| `npm run check:contract` | **PASS** — all six exports parse (54 holdings, 11 history dates, 2 alerts, goals = 0) |
+| `npm run check:daypnl` | **PASS** |
+| `uv run pytest` | **PASS**, exit 0, 2 skipped, zero failures (no Python touched this pass) |
+| `npm run build` | **FAILS** — but only because it is `tsc -b && vite build` and `tsc -b` hits the same 11 pre-existing errors. Fails identically on `main`. Not a regression; bundle sizes below were therefore measured with `npx vite build`. |
+
+### Non-negotiables — all pass
+
+- **Determinism boundary intact.** `/api/ask` appears only in `ChatDrawer.tsx`
+  and a `types/bridge.ts` docstring. No new surface calls the agent.
+- **Contract untouched.** Zero diff in `dashboard/src/types/contract.ts`,
+  `scripts/`, or `src/portfolio/`. No component reads a field outside the Zod
+  schemas.
+- **`index.css` diff is exactly the 3 sanctioned lines** — `--chart-journey`
+  in `:root`, the same in `.dark`, `--color-chart-journey` in `@theme inline`.
+  `.dark {}` is otherwise byte-identical; `--chart-1`..`--chart-9` untouched,
+  as `tokens.md` requires.
+- **Navigation still in-memory.** `useWorkspace` / `onWorkspaceChange`; the new
+  `ManageMenu.tsx` dispatches through the same hook. No routing assumption added.
+- **Privacy masking comprehensive.** Every money figure on Journey (hero,
+  today panel, account roads, goals) and Portfolio (stat cards, table rows,
+  subtotals) flips to `MASK_TEXT`. Verified live with the eye toggle.
+- **Console clean.** Zero errors and zero warnings across the entire
+  six-workspace walkthrough, all viewports, and both loading and loaded states.
+
+### IA restructure — verified end-to-end
+
+- 4 primary pills (Journey / Allocation / Portfolio / Alerts) + a **Manage**
+  dropdown containing exactly Properties and Groww/Sharekhan Data, with a
+  correct active state when a secondary workspace is current.
+- **The staleness loop closes.** Journey's condensed chip
+  ("3 sources need attention →") navigates to Alerts, which shows the promoted
+  per-source *Data freshness* detail (Zerodha fresh, Moomoo fresh, Groww MFs /
+  Groww equities / Sharekhan stale, each with an action hint). This was the
+  single most important thing the restructure was supposed to buy, and it works.
+
+### What matches the brief's intent well
+
+- **Journey hero** — Fraunces numeral, live-sync chips, condensed staleness
+  chip. Reads exactly like §2's "one number, calmly" intent.
+- **JourneyChart restyle** — verified *rendered*, not just authored:
+  `stroke-width: 2.5`, `stroke-linecap: round`, `var(--border)` dashed `4 4`
+  gridlines, gold gradient fill, `shadow-md` Card. §4 satisfied.
+- **Allocation** — real ECharts donut rings with beside-legends, promoted
+  full-width Account Roads.
+- **Alerts** — now genuinely the single home for "things needing attention."
+- **Portfolio** — search, sort, group-by-platform, and the Real Estate chip all
+  work, with subtotals recomputing correctly. Null `avgPrice` renders `—`.
+  Goals empty state renders cleanly.
+- **Loading skeletons** are on-palette ivory, no layout shift, no console noise
+  (`qa-journey-loading-skeleton.png`, `qa-portfolio-loading-skeleton.png`).
+  Portfolio's skeleton matches its final layout well (4 stat cards + table).
+
+### Deliberate deviations noticed — and whether they hold up
+
+1. **JourneyChart uses one constant bronze-gold `trendColor`** instead of the
+   pre-redesign per-range gain/loss color swap. Documented in-file with the
+   reasoning (direction is still legible via the delta chips, tooltip, and
+   YearStrip). **Justified** — this is exactly the restraint §2 asks for.
+2. **`AccountRoads` excludes `real_estate`** while the same page's "By platform"
+   donut includes it at 33.8%. Defensible (real estate has no meaningful
+   day-over-day road) but currently *undocumented and unexplained to the user*
+   — see Minor findings.
+3. **Categorical `--chart-1`..`--chart-9` left saturated.** Sanctioned by
+   `tokens.md`'s "explicitly not touched." Noting only that the cumulative
+   effect (saturated blue/green/gold/red/purple donuts and bars against ivory,
+   visible in `qa-allocation-donut-tooltip.png`) is the largest remaining
+   off-brand surface in the app. **For `dashboard-ui-designer`**, as a
+   fast-follow scope call — not an engineering defect.
+
+---
+
+### Findings
+
+Severity is this reviewer's own judgment.
+**Critical** = breaks a non-negotiable or a core brief requirement.
+**Important** = spec deviation with real user impact. **Minor** = polish.
+
+#### Critical
+
+**C1. Hardcoded dark chart colors propagated into new light-mode code.**
+`dashboard/src/components/charts/options.ts` — tooltip block
+`backgroundColor: 'rgba(20,20,24,0.92)'` / `borderColor: 'rgba(255,255,255,0.1)'` /
+`textStyle.color: '#e8e8ea'` is repeated **8×** (≈ lines 56, 135, 185, 238, 319,
+373, 427, 494), plus top-of-file `CHART_TEXT = '#9b9ba3'`,
+`AXIS_LINE = 'rgba(255,255,255,0.08)'` and `CATEGORY_COLORS = ['#6f7cff', …]`.
+The new donut option added by Task 2 (+133 lines) **copied this pattern rather
+than tokenizing it**, so the redesign actively extended a
+no-hardcoded-colors violation.
+*Confirmed live, not inferred*: hovering the Allocation "By geography" donut
+with a real mouse produces a tooltip computing to
+`background-color: rgba(20, 20, 24, 0.92)` / `color: rgb(232, 232, 234)` — a
+dark chip on an ivory page (`qa-allocation-donut-tooltip.png`). The same file's
+`AXIS_LINE` is white-on-white, i.e. the Platform-breakdown bar chart's axis line
+is invisible in light mode.
+*Required instead*: `var(--card)` / `var(--border)` / `var(--foreground)` per
+`tokens.md`; this is a repo non-negotiable independent of what the brief said.
+→ **`dashboard-react-engineer`**. Some of it is pre-existing, but Task 2 is what
+put it in front of the user on a redesigned light page, so it belongs to this pass.
+
+#### Important
+
+**I1. Journey desktop layout is badly imbalanced at ≥1280px.**
+`lg:grid-cols-[1fr_340px]`. Measured column heights: left 463px (999px wide) vs
+right rail 1407px — roughly **944px of dead ivory** in the *primary* column. The
+page's most important content occupies the top third of a very tall scroll.
+Disappears at 768px where it stacks. → engineer.
+
+**I2. Account Roads condensed labels truncate to a single character.**
+`dashboard/src/components/journey/AccountRoads.tsx:91–106`. The row is
+`flex gap-3` with fixed children: dot 8 + `MiniSpark` 64 (`width = 64`, line 58)
++ value `min-w-[92px]` + delta `min-w-[84px]` + 4 × `gap-3` (48) = **296px** of
+the 307px available in the condensed card, leaving ~11px for the label, which
+is `min-w-0 flex-1 truncate`. Result: "G", "M", "Z.", "S.".
+The `variant` prop gates **row count only** (`CONDENSED_ROW_LIMIT`), not row
+layout — so the condensed variant is unreadable as a platform breakdown.
+*Required instead*: the brief's intent is a labeled per-platform snapshot; the
+label is the one part that cannot be dropped. → engineer.
+
+**I3. `TrendChart.tsx` was never restyled but renders as a first-class card on
+the redesigned Allocation page.** Confirmed absent from
+`git diff --stat main..HEAD -- dashboard/src`. Visible at the bottom of
+`qa-allocation-donut-tooltip.png`: saturated blue/purple/green stacked area with
+a lavender wash, next to Ledger Gold cards. Either restyle it or drop it from
+the page. → engineer (if it should be restyled) / designer (if the call is to
+remove it).
+
+**I4. "Day-over-day change" bar strip renders only one visible bar.** One value
+(+₹75.48L) dwarfs the rest, so every other bar computes to ~0px height. The
+strip conveys nothing. Needs a symlog/relative scale or a different encoding.
+→ engineer.
+
+**I5. `TOP GAINERS` / `TOP LOSERS` headings are ALL-CAPS and use a
+non-Ledger-Gold card treatment.** `AllocationScreen.tsx:70–82`
+(`uppercase tracking-wider`, plus ad-hoc `border-gain/30 bg-gain/5` instead of
+`Card`). Task 0's Interfaces block explicitly says *no ALL-CAPS label* per this
+repo's `frontend-design` guidance. → engineer.
+
+**I6. Portfolio holdings table overflows horizontally at 1512px.**
+`scrollWidth 1645` vs `clientWidth 1458`; the "Day %" column is clipped off the
+right edge with no visible scroll affordance at the default desktop width.
+→ engineer.
+
+#### Minor
+
+- **M1.** Allocation label casing is inconsistent within one row of cards:
+  Title Case platforms ("Real Estate", "Groww") beside lowercase asset classes
+  ("real estate", "mutual fund", "etf"). Visible side-by-side in
+  `qa-allocation-donut-tooltip.png`. → engineer.
+- **M2.** `AccountRoads` silently excludes `real_estate` (`AccountRoads.tsx:122`)
+  while the adjacent donut shows it at 33.8% — the two cards disagree with no
+  explanation. Add a one-line note, or include it. → engineer.
+- **M3.** Properties shows three identical summary cards, one of which uses
+  `.font-headline` (30px Fraunces) while the other two are 28px sans. Reads
+  accidental, and is a literal deviation from §2's *"keep that restraint rule,
+  do not spread serif to other numbers."* → engineer to unify;
+  **cc `dashboard-ui-designer`** if the serif there was intentional.
+- **M4.** Nav label "Groww/Sharekhan Data" vs that page's H1 "CAS Import" —
+  pick one name. → engineer.
+- **M5.** Portfolio's Segment selector is still a native `<select>`; §5 prefers
+  a shadcn Select. → engineer.
+- **M6.** Journey chart's leftmost x-tick is clipped ("-24" instead of "08-24");
+  milestone value labels collide at ≤1024px. Both pre-existing. → engineer.
+- **M7.** Nav pill track overflows at 768px, hiding the "Alerts" tab behind a
+  horizontal scroll with no affordance. → engineer.
+- **M8.** Loading skeletons don't mirror final layout on Journey (renders one
+  wide block + 3 cards; the loaded page is a 2-col grid with a right rail), and
+  the `PageHeader` is absent during loading on Portfolio, so the H1 pops in.
+  Cosmetic. → engineer.
+
+#### Pre-existing, out of scope — noted, not attributed to this pass
+
+- `dashboard/src/components/layout/HealthTicker.tsx:100` has `gap-y-1` but no
+  `flex-wrap`, so the footer blows up to 111px tall and overflows at 768px. The
+  correct pattern already exists in
+  `SegmentReconcileBar.tsx:52,56` (`flex flex-wrap items-center gap-x-4 gap-y-1`).
+  Untouched by this branch; worth a separate one-line fix.
+
+### Bundle-size delta
+
+`npx vite build` (bypassing the pre-existing `tsc -b` failure), branch
+`redesign/ledger-gold` @ `1316daf` vs `main` @ `a0afe2a` built from a scratch
+worktree with the same `node_modules`:
+
+| Asset | main | branch | delta |
+|---|---|---|---|
+| `index-*.css` | 58.69 kB (10.63 gz) | 60.93 kB (10.92 gz) | **+2.24 kB (+0.29 gz)** |
+| `index-*.js` | 689.01 kB (212.47 gz) | 708.84 kB (217.30 gz) | **+19.83 kB (+4.83 gz)** |
+| `echarts-*.js` | 604.32 kB (204.36 gz) | 604.32 kB (204.36 gz) | 0 |
+| `react-*.js` | 194.38 kB (61.75 gz) | 194.38 kB (61.75 gz) | 0 |
+| `data-*.js` | 163.33 kB (44.10 gz) | 163.33 kB (44.10 gz) | 0 |
+| **Total** | **1711.54 kB (534.23 gz)** | **1733.59 kB (539.35 gz)** | **+22.05 kB (+5.12 kB gz, +0.96 %)** |
+
+Module count 3633 → 3637 (the 4 new files: `journey/staleness.ts`,
+`layout/ManageMenu.tsx`, `layout/PageHeader.tsx`, `ui/dropdown-menu.tsx`).
+**No new vendor chunk; ECharts was already bundled.** +5 kB gzip for a
+six-page redesign plus a Radix dropdown is a reasonable cost.
+
+### Coverage statement
+
+Verified in a live browser on light mode at 1512 / 1024 / 768 px:
+all six workspaces (Journey, Allocation, Portfolio, Alerts via primary nav;
+Properties, Groww/Sharekhan Data via Manage), against the real exports in
+`dashboard/public/data/` — including the sparse cases (`goals.json` empty →
+empty state, null `avgPrice` → `—`, an 11-point history, Sharekhan at 0.4 %
+of the portfolio). Loading skeletons captured for Journey and Portfolio via
+request delay. Privacy mask toggled on Journey and Portfolio. Donut tooltip
+exercised with a real mouse hover (synthetic `MouseEvent` dispatch does not
+work — ECharts/zrender does its own hit-testing). **Not verified: dark mode**
+(out of scope this pass) and the Refresh / CAS-upload actions (deliberately not
+clicked — they trigger live broker or import side effects).
