@@ -23,11 +23,6 @@ import { Card, CardContent } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
 import type { History } from '@/types/contract'
 
-/** platformLabel + the snake_case special case (real_estate → "Real estate"). */
-function platformDisplay(platform: string): string {
-  return platform === 'real_estate' ? 'Real estate' : platformLabel(platform)
-}
-
 const PLATFORM_COLORS: Record<string, string> = {
   zerodha: 'var(--chart-1)',
   moomoo: 'var(--chart-2)',
@@ -95,7 +90,7 @@ function RoadRowItem({ row }: { row: RoadRow }) {
   return (
     <div className="flex items-center gap-3 py-2.5 border-b border-border/50 last:border-0">
       <span className="size-2 rounded-full shrink-0" style={{ backgroundColor: color }} />
-      <span className="text-sm font-medium min-w-0 flex-1 truncate">{platformDisplay(row.platform)}</span>
+      <span className="text-sm font-medium min-w-0 flex-1 truncate">{platformLabel(row.platform)}</span>
       <MiniSpark values={row.values} color={color} />
       <span className="text-sm font-semibold tabular-nums text-right min-w-[92px]">
         {masked ? MASK_TEXT : formatInrCompact(row.current)}

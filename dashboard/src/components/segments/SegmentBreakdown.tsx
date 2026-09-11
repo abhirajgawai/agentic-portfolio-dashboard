@@ -42,11 +42,6 @@ function daysBetweenIso(afterIso: string | null, beforeIso: string | null): numb
   return (after.getTime() - before.getTime()) / MS_PER_DAY
 }
 
-/** platformLabel + the snake_case special case (real_estate → "Real estate"). */
-function platformDisplay(platform: string): string {
-  return platform === 'real_estate' ? 'Real estate' : platformLabel(platform)
-}
-
 /** One platform summary row (computed from segment membership). */
 interface PlatformRow {
   platform: string
@@ -233,9 +228,9 @@ export function SegmentBreakdown({ segment, onBack, onDossierSelect }: SegmentBr
                         replaceFilters({ ...activeFilters, platform: new Set([r.platform]) })
                       }
                       className="rounded px-1 py-0.5 font-medium text-foreground underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                      title={`Filter universe to ${platformDisplay(r.platform)}`}
+                      title={`Filter universe to ${platformLabel(r.platform)}`}
                     >
-                      {platformDisplay(r.platform)}
+                      {platformLabel(r.platform)}
                     </button>
                   </td>
                   <td className="px-2 py-1.5 text-right tabular-nums">{r.count}</td>
@@ -283,8 +278,8 @@ export function SegmentBreakdown({ segment, onBack, onDossierSelect }: SegmentBr
                       className="inline-flex items-center gap-1 text-muted-foreground"
                       title={
                         Number.isFinite(r.daysPast) && r.daysPast > 0
-                          ? `${platformDisplay(r.platform)}: ${Math.round(r.daysPast)}d past its ${staleThresholdDays(r.platform)}d threshold`
-                          : `${platformDisplay(r.platform)}: within its ${staleThresholdDays(r.platform)}d threshold`
+                          ? `${platformLabel(r.platform)}: ${Math.round(r.daysPast)}d past its ${staleThresholdDays(r.platform)}d threshold`
+                          : `${platformLabel(r.platform)}: within its ${staleThresholdDays(r.platform)}d threshold`
                       }
                     >
                       <span

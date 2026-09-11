@@ -68,12 +68,6 @@ function formatNative(value: number, currency: string): string {
   return cached.format(value)
 }
 
-/** Platform display label — real_estate reads "Real estate", others Title Case. */
-function platformDisplayLabel(platform: string): string {
-  if (platform === 'real_estate') return 'Real estate'
-  return platformLabel(platform)
-}
-
 /* ------------------------------------------------------------------ */
 /* Platform row (summary = the row; <details> keeps it keyboard-native) */
 /* ------------------------------------------------------------------ */
@@ -85,7 +79,7 @@ function PlatformRow({ row, masked }: { row: DayPnlPlatformRow; masked: boolean 
       <summary className="flex cursor-pointer list-none items-center justify-between gap-2 rounded-md px-1 py-1.5 transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
         <span className="flex min-w-0 items-center gap-1.5">
           <ChevronRight className="size-3.5 shrink-0 text-muted-foreground transition-transform group-open:rotate-90" aria-hidden="true" />
-          <span className="truncate text-sm font-medium">{platformDisplayLabel(row.platform)}</span>
+          <span className="truncate text-sm font-medium">{platformLabel(row.platform)}</span>
           <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
             {row.holdings.length} holding{row.holdings.length === 1 ? '' : 's'}
           </span>
@@ -225,7 +219,7 @@ export function DayPnlBreakdownDialog({
               revaluation events on the Performance tab.
               {breakdown.noDayPnlPlatforms.length > 0 && (
                 <span className="mt-1 block">
-                  No live day P&L: {breakdown.noDayPnlPlatforms.map(platformDisplayLabel).join(', ')}.
+                  No live day P&L: {breakdown.noDayPnlPlatforms.map(platformLabel).join(', ')}.
                 </span>
               )}
             </p>

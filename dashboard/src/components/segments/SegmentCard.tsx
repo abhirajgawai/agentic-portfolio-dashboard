@@ -37,11 +37,6 @@ const SEGMENT_ICONS = {
   consolidated: Layers,
 } as const
 
-/** platformLabel + the snake_case special case (real_estate → "Real estate"). */
-function platformDisplay(platform: string): string {
-  return platform === 'real_estate' ? 'Real estate' : platformLabel(platform)
-}
-
 const MS_PER_DAY = 86_400_000
 
 /** Days PAST a platform's threshold, measured against the export's own
@@ -122,7 +117,7 @@ export function SegmentCard({
         .sort()
         .map((p) => ({
           platform: p,
-          label: platformDisplay(p),
+          label: platformLabel(p),
           daysPast: platformDaysPast(p, data?.asOf ?? null, data?.platforms[p]?.asOf ?? null),
           threshold: staleThresholdDays(p),
         })),
