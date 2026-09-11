@@ -147,11 +147,14 @@ function BreakdownRow({
           className={cn(
             'rounded-full border px-2.5 py-1 font-medium tabular-nums transition-colors',
             activeBucketId === bucket.id
-              ? 'border-primary bg-primary/10 text-primary'
+              ? 'border-primary bg-primary text-primary-foreground shadow-sm'
               : 'border-border text-muted-foreground hover:text-foreground hover:bg-accent/50',
           )}
         >
-          {bucket.label} <span className="opacity-70">{masked ? MASK_TEXT : formatInrCompact(value)}</span>
+          {bucket.label}{' '}
+          <span className={activeBucketId === bucket.id ? 'opacity-90' : 'opacity-70'}>
+            {masked ? MASK_TEXT : formatInrCompact(value)}
+          </span>
         </button>
       ))}
     </div>
@@ -424,6 +427,7 @@ function PortfolioScreenInner({
           perRowCurrency={mixedCurrency}
           platformVisible={multiPlatform}
           showSparkline
+          enableGrouping={multiPlatform}
           onSelect={handleDossierSelect}
         />
       ) : (

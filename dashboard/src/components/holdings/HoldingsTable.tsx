@@ -19,12 +19,12 @@
  */
 
 import { flexRender, getCoreRowModel, getFilteredRowModel, getSortedRowModel, useReactTable, createColumnHelper } from '@tanstack/react-table'
-import { ArrowDown, ArrowUp, ChevronsUpDown, Search } from 'lucide-react'
+import { ArrowDown, ArrowUp, ChevronsUpDown, Layers, Search } from 'lucide-react'
 import { useMemo, useState, memo, useRef, useEffect } from 'react'
 
-import { Badge } from '@/components/ui/badge'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import { Toggle } from '@/components/ui/toggle'
 import { EmptyState } from '@/components/layout/states'
 import { EChart } from '@/components/charts/EChart'
 import { buildSparklineOption, platformTrendPct } from '@/lib/sparkline'
@@ -36,10 +36,23 @@ import { cn } from '@/lib/utils'
 
 const columnHelper = createColumnHelper<Holding>()
 
+/** Columns whose header + cells right-align (numeric columns, Ledger Gold pattern). */
+const RIGHT_ALIGN_COLS = new Set(['qty', 'avgPrice', 'ltp', 'value', 'dayChangePct', 'returnPct'])
+
 function PctCell({ value, align = 'right' }: { value: number | null; align?: 'right' | 'left' }) {
   if (value === null) return <span className="text-muted-foreground">—</span>
   const cls = value > 0 ? 'text-gain' : value < 0 ? 'text-loss' : 'text-muted-foreground'
   return <span className={cn('tabular-nums', cls, align === 'right' ? 'text-right' : '')}>{formatPct(value)}</span>
+}
+
+/** Real estate rows have no share-count concept — "1 property" reads better
+ *  than a bare "1". Other platforms keep the plain quantity. */
+function QtyCell({ platform, qty, masked }: { platform: string; qty: number; masked: boolean }) {
+  if (masked) return <span className="tabular-nums">{MASK_TEXT}</span>
+  if (platform === 'real_estate') {
+    return <span className="tabular-nums">{qty === 1 ? '1 property' : `${formatQty(qty)} properties`}</span>
+  }
+  return <span className="tabular-nums">{formatQty(qty)}</span>
 }
 
 interface HoldingsTableProps {
@@ -63,6 +76,9 @@ interface HoldingsTableProps {
   variant?: 'default' | 'sidebar'
   /** Suppress the built-in header (count + search). Used when the parent provides its own. */
   hideHeader?: boolean
+  /** Show a "Group by platform" Toggle in the header (default false — most
+   *  callers already scope to a single platform/segment and don't need it). */
+  enableGrouping?: boolean
   className?: string
 }
 
@@ -76,12 +92,14 @@ const HoldingsTableInner = memo(function HoldingsTableInner({
   showSparkline = false,
   variant = 'default',
   hideHeader = false,
+  enableGrouping = false,
   perRowCurrency = false,
   className,
 }: HoldingsTableProps) {
   const isSidebar = variant === 'sidebar'
   const [sorting, setSorting] = useState([{ id: 'value', desc: true }])
   const [search, setSearch] = useState('')
+  const [grouped, setGrouped] = useState(false)
   const { masked } = usePrivacy()
   const history = useHistory()
   const tbodyRef = useRef<HTMLTableSectionElement>(null)
@@ -119,6 +137,10 @@ const HoldingsTableInner = memo(function HoldingsTableInner({
     return map
   }, [effectiveShowSparkline, history.data])
 
+  // Sub-label suppressed while grouped (the group sub-header already names
+  // the platform, so repeating it per-row is redundant).
+  const showPlatformSubLabel = platformVisible && !grouped
+
   const columns = useMemo(
     () => {
       const platformBadge = (platform: string) => (
@@ -151,19 +173,33 @@ const HoldingsTableInner = memo(function HoldingsTableInner({
         cell: (info) => info.getValue() ?? '—',
       })
 
-      const platformCol = columnHelper.accessor('platform', {
-        header: 'Platform',
-        cell: (info) => (
-          <Badge variant="secondary" className="font-normal">
-            {platformLabel(info.getValue())}
-          </Badge>
-        ),
+      // Two-line "instrument" cell (Ledger Gold pattern): instrument
+      // name + ticker on the top line, platform as a muted sub-label
+      // underneath. Replaces the separate Ticker / Name / Platform columns
+      // in the default (non-sidebar) table.
+      const instrumentCol = columnHelper.accessor('ticker', {
+        id: 'instrument',
+        header: 'Instrument',
+        cell: (info) => {
+          const h = info.row.original
+          return (
+            <div className="min-w-0">
+              <div className="truncate font-medium leading-tight">
+                {h.name ?? h.ticker}
+                {h.name && <span className="ml-1.5 text-muted-foreground">{h.ticker}</span>}
+              </div>
+              {showPlatformSubLabel && (
+                <div className="text-xs leading-tight text-muted-foreground">{platformLabel(h.platform)}</div>
+              )}
+            </div>
+          )
+        },
       })
 
       const qtyCol = columnHelper.accessor('qty', {
         header: 'Qty',
         cell: (info) => (
-          <span className="tabular-nums">{masked ? MASK_TEXT : formatQty(info.getValue())}</span>
+          <QtyCell platform={info.row.original.platform} qty={info.getValue()} masked={masked} />
         ),
       })
 
@@ -256,11 +292,10 @@ const HoldingsTableInner = memo(function HoldingsTableInner({
         return [tickerCol, nameCol, valueCol]
       }
 
-      // Default: full column set
+      // Default: full column set — two-line Instrument cell replaces the
+      // separate Ticker / Name / Platform columns.
       return [
-        tickerCol,
-        nameCol,
-        ...(platformVisible ? [platformCol] : []),
+        instrumentCol,
         qtyCol,
         avgPriceCol,
         ltpCol,
@@ -270,7 +305,7 @@ const HoldingsTableInner = memo(function HoldingsTableInner({
         returnCol,
       ]
     },
-    [displayCurrency, masked, platformVisible, effectiveShowSparkline, isSidebar, perRowCurrency],
+    [displayCurrency, masked, showPlatformSubLabel, effectiveShowSparkline, isSidebar, perRowCurrency],
   )
 
   // Stable data reference — only recreate when holdings array content changes
@@ -297,6 +332,34 @@ const HoldingsTableInner = memo(function HoldingsTableInner({
   })
 
   const rows = table.getRowModel().rows
+
+  // Group-by-platform: bucket the already-sorted rows by platform, preserving
+  // within-group order (so the active column sort still applies inside each
+  // group). Subtotal is only shown when every row in the group shares a
+  // display currency — mixed-currency groups (e.g. consolidated + moomoo)
+  // just show the count.
+  const groupedRows = useMemo(() => {
+    if (!grouped) return null
+    const order: string[] = []
+    const byPlatform = new Map<string, typeof rows>()
+    for (const row of rows) {
+      const platform = row.original.platform
+      if (!byPlatform.has(platform)) {
+        byPlatform.set(platform, [])
+        order.push(platform)
+      }
+      byPlatform.get(platform)!.push(row)
+    }
+    return order.map((platform) => {
+      const groupRows = byPlatform.get(platform)!
+      const currencies = new Set(groupRows.map((r) => r.original.displayCurrency))
+      const subtotal =
+        currencies.size === 1
+          ? groupRows.reduce((sum, r) => sum + r.original.valueDisplay, 0)
+          : null
+      return { platform, rows: groupRows, subtotal, currency: groupRows[0]?.original.displayCurrency ?? displayCurrency }
+    })
+  }, [grouped, rows, displayCurrency])
 
   // Arrow-key row navigation (↑/↓) when selection is enabled. Focus stays on the
   // selected row; Home/End jump to the first/last row. All keys are guarded to
@@ -337,24 +400,87 @@ const HoldingsTableInner = memo(function HoldingsTableInner({
     )
   }
 
+  const renderRow = (row: (typeof rows)[number]) => {
+    const isSelected = selectable && selectedTicker === row.original.ticker
+    return (
+      <tr
+        key={`${row.original.platform}:${row.original.ticker}:${row.id}`}
+        data-ticker={row.original.ticker}
+        data-selected={isSelected ? 'true' : undefined}
+        aria-selected={isSelected}
+        tabIndex={selectable && isSelected ? 0 : -1}
+        onClick={
+          selectable
+            ? () => {
+                selectedTickerSet?.(row.original.ticker)
+                onSelect?.(row.original.ticker)
+              }
+            : undefined
+        }
+        onKeyDown={
+          selectable
+            ? (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault()
+                  selectedTickerSet?.(row.original.ticker)
+                  onSelect?.(row.original.ticker)
+                }
+              }
+            : undefined
+        }
+        className={cn(
+          'border-b border-border/50 transition-colors last:border-0 hover:bg-accent/40',
+          isSelected && 'bg-accent/40',
+        )}
+      >
+        {row.getVisibleCells().map((cell) => {
+          const rightAlign = RIGHT_ALIGN_COLS.has(cell.column.id)
+          return (
+            <td
+              key={cell.id}
+              className={cn('px-3 align-middle', isSidebar ? 'py-1' : 'py-2', rightAlign && 'text-right')}
+            >
+              {flexRender(cell.column.columnDef.cell, cell.getContext())}
+            </td>
+          )
+        })}
+      </tr>
+    )
+  }
+
   return (
     <Card
       className={cn('overflow-hidden', isSidebar && '[--row-height:2rem]', className)}
       style={isSidebar ? { '--row-height': '2rem' } as React.CSSProperties : undefined}
     >
       {!hideHeader && (
-        <div className="flex items-center justify-between border-b px-3 py-2">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b px-3 py-2">
           <span className="min-w-0 truncate text-xs text-muted-foreground">
             {rows.length} holding{rows.length === 1 ? '' : 's'}
           </span>
-          <div className="relative w-full sm:w-56">
-            <Search className="absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search ticker / name / platform…"
-              className="h-8 pl-7 text-xs"
-            />
+          <div className="flex items-center gap-2">
+            {enableGrouping && (
+              <Toggle
+                variant="outline"
+                size="sm"
+                pressed={grouped}
+                onPressedChange={setGrouped}
+                aria-label="Group by platform"
+                className="h-8 gap-1.5 text-xs data-[state=on]:border-primary data-[state=on]:bg-primary/10 data-[state=on]:text-primary"
+              >
+                <Layers className="size-3.5" />
+                Group by platform
+              </Toggle>
+            )}
+            <div className="relative w-full sm:w-56">
+              <Search className="absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search ticker / name / platform…"
+                className="h-8 pl-7 text-xs"
+              />
+            </div>
           </div>
         </div>
       )}
@@ -367,12 +493,14 @@ const HoldingsTableInner = memo(function HoldingsTableInner({
                   const sorted = header.column.getIsSorted()
                   const canSort = header.column.getCanSort()
                   const ariaSort = canSort ? (sorted === 'asc' ? 'ascending' : sorted === 'desc' ? 'descending' : 'none') : undefined
+                  const rightAlign = RIGHT_ALIGN_COLS.has(header.column.id)
                   return (
                     <th
                       key={header.id}
                       aria-sort={ariaSort}
                       className={cn(
                         'px-3 py-2 text-xs font-medium text-muted-foreground',
+                        rightAlign && 'text-right',
                         canSort ? 'cursor-pointer select-none hover:text-foreground' : '',
                       )}
                       onClick={header.column.getToggleSortingHandler()}
@@ -384,7 +512,7 @@ const HoldingsTableInner = memo(function HoldingsTableInner({
                       }}
                       tabIndex={canSort ? 0 : undefined}
                     >
-                      <span className="flex items-center gap-1">
+                      <span className={cn('flex items-center gap-1', rightAlign && 'justify-end')}>
                         {flexRender(header.column.columnDef.header, header.getContext())}
                         {canSort &&
                           (sorted === 'asc' ? (
@@ -411,54 +539,25 @@ const HoldingsTableInner = memo(function HoldingsTableInner({
                   No holdings match “{search}”
                 </td>
               </tr>
-            ) : (
-              rows.map((row) => {
-                const isSelected = selectable && selectedTicker === row.original.ticker
-                return (
-                  <tr
-                    key={`${row.original.platform}:${row.original.ticker}:${row.id}`}
-                    data-ticker={row.original.ticker}
-                    data-selected={isSelected ? 'true' : undefined}
-                    aria-selected={isSelected}
-                    tabIndex={selectable && isSelected ? 0 : -1}
-                    onClick={
-                      selectable
-                        ? () => {
-                            selectedTickerSet?.(row.original.ticker)
-                            onSelect?.(row.original.ticker)
-                          }
-                        : undefined
-                    }
-                    onKeyDown={
-                      selectable
-                        ? (e) => {
-                            if (e.key === 'Enter' || e.key === ' ') {
-                              e.preventDefault()
-                              selectedTickerSet?.(row.original.ticker)
-                              onSelect?.(row.original.ticker)
-                            }
-                          }
-                        : undefined
-                    }
-                    className={cn(
-                      'border-b border-border/50 transition-colors last:border-0 hover:bg-accent/40',
-                      isSelected && 'bg-accent/40',
+            ) : groupedRows ? (
+              groupedRows.flatMap((group) => [
+                <tr key={`group:${group.platform}`} className="bg-muted/50">
+                  <td colSpan={columns.length} className="px-3 py-1.5 text-xs font-semibold text-foreground">
+                    {platformLabel(group.platform)}
+                    <span className="ml-2 font-normal text-muted-foreground">
+                      {group.rows.length} holding{group.rows.length === 1 ? '' : 's'}
+                    </span>
+                    {group.subtotal !== null && (
+                      <span className="ml-2 font-normal tabular-nums text-muted-foreground">
+                        {masked ? MASK_TEXT : formatMoney(group.subtotal, group.currency)}
+                      </span>
                     )}
-                  >
-                    {row.getVisibleCells().map((cell) => (
-                      <td
-                        key={cell.id}
-                        className={cn(
-                          'px-3 align-middle',
-                          isSidebar ? 'py-1' : 'py-2',
-                        )}
-                      >
-                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                      </td>
-                    ))}
-                  </tr>
-                )
-              })
+                  </td>
+                </tr>,
+                ...group.rows.map((row) => renderRow(row)),
+              ])
+            ) : (
+              rows.map((row) => renderRow(row))
             )}
           </tbody>
         </table>

@@ -154,9 +154,13 @@ export function formatAsOfLongSGT(iso: string | null | undefined): string {
   })
 }
 
-/** Platform label for badges (lowercase keys -> Title Case). */
+/** Platform label for badges (lowercase, possibly snake_case keys -> Title Case,
+ *  e.g. "real_estate" -> "Real Estate"). */
 export function platformLabel(platform: string): string {
-  return platform.charAt(0).toUpperCase() + platform.slice(1)
+  return platform
+    .split('_')
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ')
 }
 
 /** Asset class label for badges/filters (snake_case -> Title Case). */
