@@ -112,7 +112,16 @@ function RoadRowItem({ row }: { row: RoadRow }) {
   )
 }
 
-export function AccountRoads({ history }: { history: History }) {
+interface AccountRoadsProps {
+  history: History
+  /** `condensed` (Journey's right-rail snapshot, max 4 rows) vs `full` (Allocation's
+   *  first-class section, every row, no truncation) — same rows/logic, presentation only. */
+  variant?: 'condensed' | 'full'
+}
+
+const CONDENSED_ROW_LIMIT = 4
+
+export function AccountRoads({ history, variant = 'full' }: AccountRoadsProps) {
   const rows = useMemo(() => {
     return Object.entries(history.byPlatform)
       .filter(([platform]) => platform !== 'real_estate')
@@ -120,6 +129,9 @@ export function AccountRoads({ history }: { history: History }) {
       .filter((r): r is RoadRow => r !== null && r.current > 0)
       .sort((a, b) => b.current - a.current)
   }, [history])
+
+  const visibleRows = variant === 'condensed' ? rows.slice(0, CONDENSED_ROW_LIMIT) : rows
+  const hiddenCount = rows.length - visibleRows.length
 
   return (
     <Card>
@@ -132,10 +144,15 @@ export function AccountRoads({ history }: { history: History }) {
           <p className="py-6 text-center text-xs text-muted-foreground">No platform data yet</p>
         ) : (
           <div>
-            {rows.map((row) => (
+            {visibleRows.map((row) => (
               <RoadRowItem key={row.platform} row={row} />
             ))}
           </div>
+        )}
+        {hiddenCount > 0 && (
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            +{hiddenCount} more on Allocation
+          </p>
         )}
       </CardContent>
     </Card>

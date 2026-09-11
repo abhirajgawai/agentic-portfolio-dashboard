@@ -14,20 +14,23 @@
  * from `@/components/workspaces/JourneyWorkspace` while the shell worker lands
  * the no-prop signature. It is a thin compat wrapper: it tolerates the current
  * shell call site (extra `latest`/`masked`/`onDossierSelect` props are ignored
- * — the component reads everything itself) and renders the canonical
- * implementation. It can be deleted once the shell imports the journey one
- * directly.
+ * — the component reads everything itself) and forwards `onWorkspaceChange`
+ * through to the canonical implementation (Journey's compact staleness chip
+ * needs it to deep-link to Alerts — design brief §3.1). It can be deleted
+ * once the shell imports the journey one directly.
  */
 
 import { JourneyWorkspace as JourneyHome } from '@/components/journey/JourneyWorkspace'
+import type { WorkspaceId } from '@/lib/workspaces'
 
 interface JourneyWorkspaceProps {
   /** @deprecated — the workspace is self-contained; these props are ignored. */
   latest?: unknown
   masked?: boolean
   onDossierSelect?: (ticker: string) => void
+  onWorkspaceChange?: (ws: WorkspaceId) => void
 }
 
-export function JourneyWorkspace(_props?: JourneyWorkspaceProps) {
-  return <JourneyHome />
+export function JourneyWorkspace({ onWorkspaceChange }: JourneyWorkspaceProps = {}) {
+  return <JourneyHome onWorkspaceChange={onWorkspaceChange} />
 }

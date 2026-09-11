@@ -78,7 +78,7 @@ export function ChartTooltipContent({
     <div
       className={cn(
         "grid gap-1 p-3 text-xs",
-        "bg-muted border border-border rounded-lg shadow-lg",
+        "bg-popover text-popover-foreground border border-border rounded-lg shadow-lg",
         className
       )}
     >

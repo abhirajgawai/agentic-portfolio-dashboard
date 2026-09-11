@@ -19,9 +19,12 @@ import { GrowwSharekhanDataScreen } from '@/components/holdings/GrowwSharekhanDa
 interface WorkspaceCenterProps {
   workspace: WorkspaceId
   setTransientDossier: (d: Partial<TransientDossier>) => void
+  /** Switches the active top-level workspace — threaded down to Journey so its
+   *  compact staleness chip can deep-link to Alerts (design brief §3.1/§3.4). */
+  onWorkspaceChange: (ws: WorkspaceId) => void
 }
 
-export function WorkspaceCenter({ workspace, setTransientDossier }: WorkspaceCenterProps) {
+export function WorkspaceCenter({ workspace, setTransientDossier, onWorkspaceChange }: WorkspaceCenterProps) {
   const latest = useLatest()
   const { masked } = usePrivacy()
 
@@ -55,7 +58,12 @@ export function WorkspaceCenter({ workspace, setTransientDossier }: WorkspaceCen
       {/* Active workspace content */}
       <div className="min-h-0 flex-1 overflow-y-auto p-4">
         {workspace === 'journey' && (
-          <JourneyWorkspace latest={latest.data} masked={masked} onDossierSelect={handleDossierSelect} />
+          <JourneyWorkspace
+            latest={latest.data}
+            masked={masked}
+            onDossierSelect={handleDossierSelect}
+            onWorkspaceChange={onWorkspaceChange}
+          />
         )}
         {workspace === 'allocation' && <AllocationScreen />}
         {workspace === 'portfolio' && <PortfolioScreen setTransientDossier={setTransientDossier} />}

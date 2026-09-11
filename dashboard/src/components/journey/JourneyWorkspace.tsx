@@ -1,8 +1,12 @@
 /**
- * Journey workspace — the default home of the Journey OS shell. Layout per
- * spec-round2 §4.1: hero headline (total value + day P&L) → JourneyChart
- * (range pills + dataZoom) → a row of TodayPanel / AccountRoads /
- * GoalMilestones+MilestoneJournal → YearStrip.
+ * Journey workspace — "how am I doing, right now and over time" (design brief
+ * docs/superpowers/specs/2026-09-12-ledger-gold-redesign-design.md §3.1).
+ * Ledger Gold layout: hero (net-worth headline in `.font-headline` Fraunces +
+ * live-sync pill chips) → compact staleness chip (deep-links to Alerts,
+ * replacing the old full-detail warning box) → a two-column grid
+ * (`1fr 340px`-ish, stacks on narrow viewports): chart + year strip on the
+ * left, a condensed account snapshot + today's change + goals/journal rail
+ * on the right.
  *
  * Determinism boundary: renders ONLY the contract JSONs (latest/history/
  * alerts via lib/data hooks) plus localStorage goals/journal — never the
@@ -11,7 +15,9 @@
  * transition-based entrance that prefers-reduced-motion disables.
  *
  * Export signature for the shell worker:
- *   <JourneyWorkspace />  (no props — self-contained)
+ *   <JourneyWorkspace onWorkspaceChange={setWorkspace} />
+ *   (onWorkspaceChange is optional — the staleness chip renders as
+ *   non-interactive if the caller doesn't pass it.)
  */
 
 import { motion, type Variants } from "motion/react";
@@ -30,6 +36,7 @@ import { ErrorState } from "@/components/layout/states";
 import { useAlerts, useHistory, useLatest } from "@/lib/data";
 import { formatAsOf, formatInrCompact, MASK_TEXT } from "@/lib/format";
 import { usePrivacy } from "@/lib/privacy";
+import type { WorkspaceId } from "@/lib/workspaces";
 import type { Latest } from "@/types/contract";
 import { usePrefersReducedMotion } from "./motion";
 
@@ -55,16 +62,14 @@ function Headline({ latest, masked }: { latest: Latest; masked: boolean }) {
   const animatedTotal = useAnimatedNumber(latest.totals.valueBase);
 
   return (
-    <div className="flex flex-wrap items-end justify-between gap-3">
-      <div>
-        <p className="text-xs text-muted-foreground">Net worth</p>
-        <p className="font-headline mt-1 text-4xl tabular-nums sm:text-5xl">
-          {masked ? MASK_TEXT : formatInrCompact(animatedTotal)}
-        </p>
-        <p className="mt-1 text-[11px] text-muted-foreground">
-          as of {formatAsOf(latest.asOf)} · {latest.holdings.length} holdings
-        </p>
-      </div>
+    <div>
+      <p className="text-xs text-muted-foreground">Net worth</p>
+      <p className="font-headline mt-1 text-4xl tabular-nums text-foreground sm:text-5xl">
+        {masked ? MASK_TEXT : formatInrCompact(animatedTotal)}
+      </p>
+      <p className="mt-1 text-[11px] text-muted-foreground">
+        as of {formatAsOf(latest.asOf)} · {latest.holdings.length} holdings
+      </p>
     </div>
   );
 }
@@ -98,7 +103,14 @@ function HeroSkeleton() {
 /* Workspace                                                           */
 /* ------------------------------------------------------------------ */
 
-export function JourneyWorkspace() {
+export function JourneyWorkspace({
+  onWorkspaceChange,
+}: {
+  /** Switches the active top-level workspace — wired to the staleness chip
+   *  so it can deep-link to Alerts (design brief §3.1/§3.4). Optional so the
+   *  component still renders standalone (e.g. in isolation/tests). */
+  onWorkspaceChange?: (ws: WorkspaceId) => void;
+} = {}) {
   const latest = useLatest();
   const history = useHistory();
   const alerts = useAlerts();
@@ -136,40 +148,31 @@ export function JourneyWorkspace() {
     >
       <h1 className="sr-only">Journey</h1>
 
-      <motion.div variants={item}>
-        <Headline latest={latest.data} masked={masked} />
+      {/* Hero: net-worth headline + live-sync pill chips + staleness chip */}
+      <motion.div variants={item} className="space-y-3">
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <Headline latest={latest.data} masked={masked} />
+          <LiveJobsRow />
+        </div>
+        <StalenessBanner
+          latest={latest.data}
+          onNavigateToAlerts={onWorkspaceChange ? () => onWorkspaceChange("alerts") : undefined}
+        />
       </motion.div>
 
-      <motion.div variants={item}>
-        <StalenessBanner latest={latest.data} />
-      </motion.div>
-
-      <motion.div variants={item}>
-        <LiveJobsRow />
-      </motion.div>
-
-      <motion.div variants={item}>
-        <JourneyChart history={history.data} />
-      </motion.div>
-
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <motion.div variants={item}>
+      {/* Chart (left, wide) + condensed rail (right, ~340px) */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_340px]">
+        <motion.div variants={item} className="min-w-0 space-y-4">
+          <JourneyChart history={history.data} />
+          <YearStrip history={history.data} />
+        </motion.div>
+        <motion.div variants={item} className="space-y-4">
           <TodayPanel latest={latest.data} alerts={alerts.data} />
-        </motion.div>
-        <motion.div variants={item}>
-          <AccountRoads history={history.data} />
-        </motion.div>
-        <motion.div variants={item}>
-          <div className="space-y-4">
-            <GoalMilestones valueBase={latest.data.totals.valueBase} />
-            <MilestoneJournal history={history.data} />
-          </div>
+          <AccountRoads history={history.data} variant="condensed" />
+          <GoalMilestones valueBase={latest.data.totals.valueBase} />
+          <MilestoneJournal history={history.data} />
         </motion.div>
       </div>
-
-      <motion.div variants={item}>
-        <YearStrip history={history.data} />
-      </motion.div>
     </motion.section>
   );
 }

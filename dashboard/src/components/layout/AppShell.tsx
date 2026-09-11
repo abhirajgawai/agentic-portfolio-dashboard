@@ -76,6 +76,7 @@ export function AppShell() {
         <WorkspaceCenter
           workspace={workspace}
           setTransientDossier={setTransientDossier}
+          onWorkspaceChange={setWorkspace}
         />
       </div>
 

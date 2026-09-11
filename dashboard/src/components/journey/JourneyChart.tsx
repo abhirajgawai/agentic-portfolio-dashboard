@@ -79,9 +79,9 @@ function sliceHistory(history: History, range: JourneyRange): { dates: string[];
 }
 
 const chartConfig: ChartConfig = {
-  portfolio: { label: "Portfolio", color: "var(--chart-1)" },
+  portfolio: { label: "Portfolio", color: "var(--chart-journey)" },
   goal: { label: "Goal", color: "var(--warning)" },
-  milestone: { label: "Milestone", color: "var(--primary)" },
+  milestone: { label: "Milestone", color: "var(--chart-journey)" },
 } satisfies ChartConfig
 
 const PATH_MORPH_DURATION_MS = 400
@@ -207,9 +207,11 @@ export function JourneyChart({ history }: { history: History }) {
   const yTicks = yScale.ticks(dense ? 6 : 5)
   const xStep = Math.max(1, Math.ceil(chartData.length / 10))
   const showPoints = dense && chartData.length <= 12
-  // Robinhood-style trend color: one color for the whole selected range,
-  // reflecting whether the period is up or down overall (not per-day).
-  const trendColor = lastValue >= firstValue ? "var(--gain)" : "var(--loss)"
+  // Ledger Gold: a single bronze-gold accent for the whole line/area, not a
+  // per-range gain/loss color swap — day-to-day direction is still legible
+  // via the gain/loss-colored delta chips, tooltip, and YearStrip elsewhere
+  // on this page; the trend line itself reads as one consistent brand mark.
+  const trendColor = "var(--chart-journey)"
   const allMilestones = useMemo(() => chartMilestones(deriveMilestones(history)), [history])
   const visibleMilestones = useMemo(() => {
     const start = sliced.dates[0]
@@ -369,7 +371,7 @@ export function JourneyChart({ history }: { history: History }) {
   }, [reduced])
 
   return (
-    <Card>
+    <Card className="shadow-md">
       <CardContent className="p-4">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <div>
@@ -418,11 +420,11 @@ export function JourneyChart({ history }: { history: History }) {
                           id="journey-area-gradient"
                           from={trendColor}
                           to={trendColor}
-                          fromOpacity={0.32}
+                          fromOpacity={0.45}
                           toOpacity={0}
                         >
-                          <stop offset="0%" stopColor={trendColor} stopOpacity={0.32} />
-                          <stop offset="55%" stopColor={trendColor} stopOpacity={0.12} />
+                          <stop offset="0%" stopColor={trendColor} stopOpacity={0.45} />
+                          <stop offset="55%" stopColor={trendColor} stopOpacity={0.18} />
                           <stop offset="100%" stopColor={trendColor} stopOpacity={0} />
                         </LinearGradient>
                          <filter id="journey-glow" x="-50%" y="-50%" width="200%" height="200%">
@@ -576,7 +578,7 @@ export function JourneyChart({ history }: { history: History }) {
                            payload={[{
                              value: tooltip.point.value,
                              name: "portfolio",
-                             color: "var(--chart-1)",
+                             color: "var(--chart-journey)",
                              payload: { name: "portfolio", value: tooltip.point.value },
                            }]}
                            formatter={(value) => masked ? MASK_TEXT : formatInrCompact(Number(value))}

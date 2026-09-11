@@ -4,16 +4,16 @@
  * (removed — Groww MF's trigger already lives in the Groww/Sharekhan Data
  * tab's CAS Import section, so nothing there was lost).
  *
- * Deliberately slim (a row, not cards) — Journey is already a busy page;
- * this is a glanceable status strip, not a full dashboard section.
+ * Deliberately slim — Ledger Gold redesign (design brief §3.1) renders this
+ * as small pill chips beside the net-worth hero rather than a boxed Card
+ * row, so live-sync status reads as a glance-able status strip, not a
+ * competing card on an already busy page.
  */
 
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { CheckCircle2, XCircle, Clock, Loader2, RefreshCw } from 'lucide-react'
 
-import { Card } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
 import { useJobsStatus, triggerSnapshot } from '@/lib/data'
 import { cn } from '@/lib/utils'
 
@@ -63,24 +63,25 @@ function LiveJobItem({ platform, label, run }: { platform: 'zerodha' | 'moomoo';
   const isError = run?.status === 'error'
 
   return (
-    <div className="flex items-center gap-2 min-w-0">
-      <Icon className={cn('size-3.5 shrink-0', badge.color)} />
-      <span className="font-medium text-xs">{label}</span>
-      <span className={cn('text-[11px] truncate', isError ? 'text-loss' : 'text-muted-foreground')} title={run?.error ?? undefined}>
+    <span
+      className="inline-flex min-w-0 items-center gap-1.5 rounded-full border border-border bg-muted/60 py-1 pl-2.5 pr-1 text-[11px]"
+      title={run?.error ?? undefined}
+    >
+      <Icon className={cn('size-3 shrink-0', badge.color)} />
+      <span className="font-medium">{label}</span>
+      <span className={cn('truncate', isError ? 'text-loss' : 'text-muted-foreground')}>
         {run ? formatWhen(run.started_at) : 'no runs yet'}
-        {isError && run?.error ? ` — ${run.error}` : null}
       </span>
-      <Button
-        variant="ghost"
-        size="sm"
-        className="h-6 px-1.5 ml-auto"
+      <button
+        type="button"
         onClick={() => mutation.mutate()}
         disabled={mutation.isPending}
         title={`Take ${label} snapshot now`}
+        className="ml-0.5 inline-flex size-5 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-border/60 hover:text-foreground disabled:opacity-50"
       >
         {mutation.isPending ? <Loader2 className="size-3 animate-spin" /> : <RefreshCw className="size-3" />}
-      </Button>
-    </div>
+      </button>
+    </span>
   )
 }
 
@@ -89,10 +90,9 @@ export function LiveJobsRow() {
   const jobs = jobsQuery.data?.jobs
 
   return (
-    <Card className="flex flex-col gap-2 p-3 sm:flex-row sm:items-center sm:gap-6">
+    <div className="flex flex-wrap items-center gap-2">
       <LiveJobItem platform="zerodha" label="Zerodha" run={jobs?.zerodha ?? null} />
-      <div className="hidden h-4 w-px bg-border sm:block" />
       <LiveJobItem platform="moomoo" label="Moomoo" run={jobs?.moomoo ?? null} />
-    </Card>
+    </div>
   )
 }

@@ -97,7 +97,7 @@ function MilestoneDot({
   return (
     <circle
       r={active ? 6 : 5}
-      fill="var(--primary)"
+      fill="var(--chart-journey)"
       filter="url(#journey-glow)"
       transform={`scale(${scale})`}
       opacity={active ? 1 : 0.9}
