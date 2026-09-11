@@ -8,6 +8,7 @@ import { dayChangeBarOption, getChartPalette, resolveThemeColor, trendAreaOption
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { formatInrCompact } from '@/lib/format'
 import { usePrivacy } from '@/lib/privacy'
+import { useTheme } from '@/lib/theme'
 import type { History } from '@/types/contract'
 
 /** Point count above which direct labels / the day-change strip would just
@@ -17,6 +18,7 @@ const CHANGE_STRIP_MAX_POINTS = 20
 
 export function TrendChart({ history }: { history: History }) {
   const { masked } = usePrivacy()
+  const { resolvedTheme } = useTheme()
 
   const option = useMemo(() => {
     const geoSeries = Object.entries(history.byGeography).map(([geo, values]) => ({
@@ -41,7 +43,12 @@ export function TrendChart({ history }: { history: History }) {
       showLabels: history.dates.length <= LABEL_MAX_POINTS,
       colors,
     })
-  }, [history, masked])
+    // resolvedTheme isn't read directly, but resolveThemeColor()/
+    // getChartPalette() read live CSS custom properties off <html> — this
+    // dep re-runs the memo (and repaints the canvas) on a theme toggle
+    // instead of leaving stale colors until an unrelated re-render fires.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [history, masked, resolvedTheme])
 
   const changeOption = useMemo(() => {
     const values = history.portfolioValueBase
@@ -53,7 +60,10 @@ export function TrendChart({ history }: { history: History }) {
       formatter: (v) => formatInrCompact(v),
       masked,
     })
-  }, [history, masked])
+    // dayChangeBarOption's tooltip/axis colors come from resolveThemeColor()
+    // internally — resolvedTheme forces a re-paint on theme toggle.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [history, masked, resolvedTheme])
 
   return (
     <Card className="shadow-sm">

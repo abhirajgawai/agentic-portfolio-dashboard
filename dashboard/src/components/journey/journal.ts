@@ -42,18 +42,6 @@ export function formatShortDate(iso: string): string {
   return `${day} ${MONTHS[Number(month) - 1] ?? month} ${year}`
 }
 
-const PLATFORM_LABELS: Record<string, string> = {
-  zerodha: 'Zerodha',
-  moomoo: 'Moomoo',
-  groww: 'Groww',
-  sharekhan: 'Sharekhan',
-  real_estate: 'Real estate',
-}
-
-export function platformLabel(platform: string): string {
-  return PLATFORM_LABELS[platform] ?? platform
-}
-
 /** Crossing boundaries — ₹10L steps up to ₹1Cr, then major milestones beyond. */
 const CROSS_LEVELS = [
   30_00_000, 40_00_000, 50_00_000, 60_00_000, 70_00_000,

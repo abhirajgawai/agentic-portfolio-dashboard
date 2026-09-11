@@ -281,7 +281,7 @@ export function CasImportScreen() {
     <div className="space-y-6">
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-semibold">CAS Import</h1>
+        <h2 className="text-lg font-semibold">CAS Import</h2>
         <p className="text-sm text-muted-foreground mt-1">
           Import Groww and Sharekhan holdings — stocks and mutual funds — from
           a Consolidated Account Statement (CAS) PDF. Request a fresh

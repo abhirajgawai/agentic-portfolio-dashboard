@@ -69,14 +69,14 @@ export function buildStalenessBuckets(latest: Latest, now: Date): StalenessBucke
       label: 'Zerodha',
       asOf: latest.platforms.zerodha?.asOf ?? null,
       stale: latest.platforms.zerodha?.stale ?? true,
-      hint: 'take a snapshot below',
+      hint: 'take a snapshot on Journey',
     },
     {
       key: 'moomoo',
       label: 'Moomoo',
       asOf: latest.platforms.moomoo?.asOf ?? null,
       stale: latest.platforms.moomoo?.stale ?? true,
-      hint: 'take a snapshot below',
+      hint: 'take a snapshot on Journey',
     },
     {
       key: 'groww-mf',

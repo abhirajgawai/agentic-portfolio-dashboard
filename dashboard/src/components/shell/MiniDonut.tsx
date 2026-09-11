@@ -14,6 +14,7 @@ import type { EChartsOption } from 'echarts'
 
 import { echarts } from '@/lib/charts'
 import { getChartPalette } from '@/components/charts/options'
+import { useTheme } from '@/lib/theme'
 import { cn } from '@/lib/utils'
 
 interface MiniDonutProps {
@@ -30,6 +31,7 @@ interface MiniDonutProps {
 export function MiniDonut({ data, colors, size = 64, onSliceClick }: MiniDonutProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<ReturnType<typeof echarts.init> | null>(null)
+  const { resolvedTheme } = useTheme()
 
   // Create the chart instance once the container mounts; tear it down on unmount.
   useEffect(() => {
@@ -112,7 +114,11 @@ export function MiniDonut({ data, colors, size = 64, onSliceClick }: MiniDonutPr
         },
       ],
     }
-  }, [data, colors])
+    // resolvedTheme isn't read directly, but getChartPalette() reads live
+    // CSS custom properties off <html> — this dep re-runs the memo (and
+    // repaints the canvas) on a theme toggle instead of leaving stale colors.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, colors, resolvedTheme])
 
   // Push new options whenever they change.
   useEffect(() => {

@@ -10,11 +10,19 @@ import { createContext, useCallback, useContext, useEffect, useState } from 'rea
 const THEME_KEY = 'portfolio.theme'
 
 type Theme = 'light' | 'dark' | 'system'
+type ResolvedTheme = 'light' | 'dark'
 
 interface ThemeContextValue {
   theme: Theme
   setTheme: (t: Theme) => void
   cycleTheme: () => void
+  /** The concrete light/dark the DOM is actually painted with right now
+   *  ('system' resolved against prefers-color-scheme). Chart option memos
+   *  that call resolveThemeColor()/getChartPalette() — which read computed
+   *  CSS off <html> at option-build time — must depend on this, or a theme
+   *  toggle repaints the DOM instantly while every <canvas> chart keeps the
+   *  previous theme's colors until an unrelated re-render happens to fire. */
+  resolvedTheme: ResolvedTheme
 }
 
 const ThemeContext = createContext<ThemeContextValue | null>(null)
@@ -29,11 +37,14 @@ function readInitialTheme(): Theme {
     : 'light'
 }
 
-function applyTheme(t: Theme) {
-  const html = document.documentElement
-  const resolved = t === 'system'
+function resolveTheme(t: Theme): ResolvedTheme {
+  return t === 'system'
     ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
     : t
+}
+
+function applyTheme(resolved: ResolvedTheme) {
+  const html = document.documentElement
   html.classList.toggle('dark', resolved === 'dark')
   html.dataset.theme = resolved
   html.style.colorScheme = resolved
@@ -41,10 +52,13 @@ function applyTheme(t: Theme) {
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setTheme] = useState<Theme>(readInitialTheme)
+  const [resolvedTheme, setResolvedTheme] = useState<ResolvedTheme>(() => resolveTheme(readInitialTheme()))
 
   // Apply the theme whenever it (or the system preference) changes.
   useEffect(() => {
-    applyTheme(theme)
+    const resolved = resolveTheme(theme)
+    applyTheme(resolved)
+    setResolvedTheme(resolved)
     try {
       window.localStorage.setItem(THEME_KEY, theme)
     } catch { /* storage unavailable — in-memory still works */ }
@@ -55,7 +69,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   }, [theme])
 
   return (
-    <ThemeContext.Provider value={{ theme, setTheme, cycleTheme }}>
+    <ThemeContext.Provider value={{ theme, setTheme, cycleTheme, resolvedTheme }}>
       {children}
     </ThemeContext.Provider>
   )

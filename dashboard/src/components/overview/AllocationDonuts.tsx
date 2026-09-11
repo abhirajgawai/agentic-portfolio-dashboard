@@ -23,21 +23,32 @@ import { EChart } from '@/components/charts/EChart'
 import { categoryValueBarsOption, donutOption, getChartPalette, resolveThemeColor } from '@/components/charts/options'
 import { formatInrCompact, platformLabel } from '@/lib/format'
 import { usePrivacy } from '@/lib/privacy'
+import { useTheme } from '@/lib/theme'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
 import type { Allocation, Latest } from '@/types/contract'
 
-type NameValue = { name: string; value: number }
+/** `id` is the raw, pre-label key (e.g. platform id `zerodha`) — kept
+ *  alongside the display `name` so a color resolver can key off the stable
+ *  raw value even after `name` has been through platformLabel() or similar. */
+type NameValue = { name: string; value: number; id: string }
 
-/** Raw allocation record -> { name, value } sorted by value desc (today's order). */
+/** Raw allocation record -> { name, value, id } sorted by value desc (today's order). */
 function toNameValue(record: Record<string, number> | undefined): NameValue[] {
   return Object.entries(record ?? {})
     .sort((a, b) => b[1] - a[1])
-    .map(([name, value]) => ({ name, value }))
+    .map(([name, value]) => ({ name, value, id: name }))
 }
 
 function colorFor(index: number): string {
   return `var(--chart-${(index % 9) + 1})`
+}
+
+/** Default coloring: by value rank (the order `data` is already sorted in) —
+ *  used by the by-geography and by-asset-class donuts, which have no fixed
+ *  category -> color mapping. */
+function rankColorIndex(_item: NameValue, index: number): number {
+  return index
 }
 
 /** Same fixed platform -> chart-N mapping as AccountRoads, so a platform's
@@ -54,24 +65,44 @@ const PLATFORM_CHART_INDEX: Record<string, number> = {
   real_estate: 4,
 }
 
+/** By-platform card only: color by the FIXED platform id (via `item.id`,
+ *  the pre-platformLabel() raw value), not value rank — otherwise the same
+ *  platform can render a different color here than in the bars card /
+ *  Account Roads below, which both use PLATFORM_CHART_INDEX. */
+function platformColorIndex(item: NameValue): number {
+  return PLATFORM_CHART_INDEX[item.id] ?? 0
+}
+
 function BreakdownCard({
   title,
   data,
   index,
+  colorIndex = rankColorIndex,
 }: {
   title: string
   data: NameValue[]
   index: number
+  /** Maps a data item to a palette/chart-N index. Defaults to rank order;
+   *  the by-platform card overrides this with platformColorIndex so its
+   *  colors agree with the bars/Account-Roads cards on the same page. */
+  colorIndex?: (item: NameValue, index: number) => number
 }) {
+  const { resolvedTheme } = useTheme()
   const option = useMemo(() => {
     const palette = getChartPalette()
     return donutOption({
       labels: data.map((d) => d.name),
       values: data.map((d) => d.value),
-      colors: data.map((_, i) => palette[i % palette.length] ?? '#6f7cff'),
+      colors: data.map((d, i) => palette[colorIndex(d, i) % palette.length] ?? '#6f7cff'),
       borderColor: resolveThemeColor('--card', '#ffffff'),
     })
-  }, [data])
+    // resolvedTheme isn't read directly here, but getChartPalette()/
+    // resolveThemeColor() read live CSS custom properties off <html> — this
+    // dep is what makes the memo re-run (and the canvas re-paint) when the
+    // theme toggles, instead of keeping stale colors until an unrelated
+    // re-render happens to fire.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, colorIndex, resolvedTheme])
 
   return (
     <Card
@@ -110,7 +141,7 @@ function BreakdownCard({
                 >
                   <span
                     className="size-2.5 shrink-0 rounded-sm"
-                    style={{ backgroundColor: colorFor(i) }}
+                    style={{ backgroundColor: colorFor(colorIndex(d, i)) }}
                   />
                   <span className="min-w-0 flex-1 truncate text-muted-foreground" title={d.name}>
                     {d.name}
@@ -133,6 +164,7 @@ function BreakdownCard({
  *  which is a percentage) so the numbers are exact, not %-of-total rounding. */
 function PlatformBreakdownBars({ holdings }: { holdings: Latest['holdings'] }) {
   const { masked } = usePrivacy()
+  const { resolvedTheme } = useTheme()
 
   const rows = useMemo(
     () =>
@@ -156,7 +188,10 @@ function PlatformBreakdownBars({ holdings }: { holdings: Latest['holdings'] }) {
       formatter: (v) => formatInrCompact(v),
       masked,
     })
-  }, [rows, masked])
+    // resolvedTheme forces a re-paint on theme toggle — see the comment on
+    // BreakdownCard's option memo above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows, masked, resolvedTheme])
 
   return (
     <Card className="donut-enter shadow-sm" style={{ animationDelay: '240ms' }}>
@@ -211,6 +246,7 @@ export function AllocationDonuts({
             ...d,
             name: platformLabel(d.name),
           }))}
+          colorIndex={platformColorIndex}
         />
         <BreakdownCard
           index={2}
