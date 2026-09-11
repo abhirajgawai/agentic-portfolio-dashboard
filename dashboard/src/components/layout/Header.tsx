@@ -13,8 +13,14 @@ import { cn } from '@/lib/utils'
 import type { RefreshState } from '@/lib/useRefresh'
 import { type WorkspaceId, WORKSPACES } from '@/lib/workspaces'
 
+import { ManageMenu } from './ManageMenu'
+
 /** How long the "Refreshed: …" summary stays visible before reverting to idle. */
 const REFRESH_DONE_TIMEOUT_MS = 4000
+
+/** Primary pill tabs in the Ledger Gold nav — Properties + Groww/Sharekhan Data
+ *  move into ManageMenu instead (design brief §3). */
+const PRIMARY_WORKSPACE_IDS: WorkspaceId[] = ['journey', 'allocation', 'portfolio', 'alerts']
 
 function truncateDetail(detail: string, maxLen = 160): string {
   const compact = detail.split('\n').slice(0, 2).join(' · ').trim()
@@ -99,7 +105,7 @@ export function Header({
       {/* ==== WORKSPACE TABS (centered segmented control) ==== */}
       <nav className="flex-1 flex items-center justify-center min-w-0" aria-label="Workspace navigation">
         <div className="flex items-center gap-0.5 rounded-md bg-muted/50 p-1 overflow-x-auto whitespace-nowrap">
-          {WORKSPACES.map((w) => (
+          {WORKSPACES.filter((w) => PRIMARY_WORKSPACE_IDS.includes(w.id)).map((w) => (
             <button
               key={w.id}
               type="button"
@@ -117,6 +123,9 @@ export function Header({
           ))}
         </div>
       </nav>
+
+      {/* ==== MANAGE MENU (Properties, Groww/Sharekhan Data) ==== */}
+      <ManageMenu workspace={workspace} onWorkspaceChange={onWorkspaceChange} />
 
       {/* ==== DIVIDER ==== */}
       <div className="w-px h-5 bg-border/50 mx-1 hidden sm:block" />
