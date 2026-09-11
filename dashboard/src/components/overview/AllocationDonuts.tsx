@@ -1,27 +1,26 @@
-/** Three allocation breakdowns — geography, platform, asset class — as
- *  segmented horizontal bars, not pie/donut charts, plus a fourth ECharts
- *  "Platform breakdown" card giving the absolute-₹ view behind the %s.
+/** Three allocation breakdowns — geography, platform, asset class — as real
+ *  ECharts donut rings (design brief §3.2 "keep asset-class/venue/currency
+ *  donuts", §5 "reuse the existing ECharts investment") with a direct-number
+ *  legend beside each ring, plus a fourth ECharts "Platform breakdown" card
+ *  giving the absolute-₹ view behind the %s.
  *
- *  Part-to-whole is a bar job, not a pie job: comparing two slice ANGLES is
- *  much harder than comparing two bar LENGTHS, and a pie has nowhere to put
- *  a direct number without a separate legend anyway — so this skips straight
- *  to what the legend was already doing (one segmented bar for the shape of
- *  the whole, a labeled list for the exact numbers) instead of carrying a
- *  pie the reader has to cross-reference against it. (Ledger Gold redesign
- *  §3.2/§5 — the design brief assumed real donut/pie charts existed here;
- *  they never did, this file deliberately chose bars over pie before the
- *  redesign, so this pass keeps that decision and restyles it instead of
- *  introducing a pie chart, per the brief's own fallback clause.)
+ *  The donut is the at-a-glance shape of the whole; the legend beside it is
+ *  the exact numbers, direct-labeled, never color-alone (comparing two slice
+ *  ANGLES is still harder than reading a number off a list, so the legend
+ *  carries the precision the ring can't).
  *
  *  Every dimension sums to ~100% by construction (normalize/allocation.py).
  *  Category color is assigned by FIXED order (index -> --chart-N), never by
  *  value rank, so the same platform keeps the same color across renders.
+ *  The donut's per-slice colors must be RESOLVED concrete values (see
+ *  getChartPalette() in options.ts) — ECharts renders to a <canvas>, which
+ *  can't resolve `var(--chart-N)` the way the legend's HTML dots can.
  */
 
 import { useMemo } from 'react'
 
 import { EChart } from '@/components/charts/EChart'
-import { categoryValueBarsOption, getChartPalette } from '@/components/charts/options'
+import { categoryValueBarsOption, donutOption, getChartPalette, resolveThemeColor } from '@/components/charts/options'
 import { formatInrCompact, platformLabel } from '@/lib/format'
 import { usePrivacy } from '@/lib/privacy'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -64,6 +63,16 @@ function BreakdownCard({
   data: NameValue[]
   index: number
 }) {
+  const option = useMemo(() => {
+    const palette = getChartPalette()
+    return donutOption({
+      labels: data.map((d) => d.name),
+      values: data.map((d) => d.value),
+      colors: data.map((_, i) => palette[i % palette.length] ?? '#6f7cff'),
+      borderColor: resolveThemeColor('--card', '#ffffff'),
+    })
+  }, [data])
+
   return (
     <Card
       className="donut-enter flex flex-col shadow-sm"
@@ -72,36 +81,28 @@ function BreakdownCard({
       <CardHeader className="pb-1">
         <CardTitle className="text-sm font-semibold">{title}</CardTitle>
       </CardHeader>
-      <CardContent className="flex-1 space-y-3">
+      <CardContent className="flex-1">
         {data.length === 0 ? (
           <div className="flex h-20 items-center justify-center text-xs text-muted-foreground">
             No allocation data
           </div>
         ) : (
-          <>
-            {/* The bar — one segmented shape for the whole, 2px gaps between
-                segments (never a seamless block a reader can't parse into parts). */}
+          <div className="flex items-center gap-3">
+            {/* The ring — the at-a-glance shape of the whole. Exact numbers
+                live in the legend beside it, never color-alone. */}
             <div
-              className="flex h-3 w-full overflow-hidden rounded-full"
+              className="w-[104px] shrink-0"
               role="img"
               aria-label={`Allocation by ${title.toLowerCase().replace('by ', '')} — ${data
                 .slice(0, 3)
                 .map((d) => `${d.name} ${d.value.toFixed(1)}%`)
                 .join(', ')}`}
-              style={{ gap: '2px' }}
             >
-              {data.map((d, i) => (
-                <div
-                  key={d.name}
-                  className="h-full first:rounded-l-full last:rounded-r-full"
-                  style={{ width: `${Math.max(d.value, 0.5)}%`, backgroundColor: colorFor(i) }}
-                  title={`${d.name}: ${d.value.toFixed(1)}%`}
-                />
-              ))}
+              <EChart option={option} height={104} />
             </div>
 
             {/* The legend — the exact numbers, direct-labeled, never color-alone. */}
-            <ul className="space-y-0.5">
+            <ul className="min-w-0 flex-1 space-y-0.5">
               {data.map((d, i) => (
                 <li
                   key={d.name}
@@ -118,7 +119,7 @@ function BreakdownCard({
                 </li>
               ))}
             </ul>
-          </>
+          </div>
         )}
       </CardContent>
     </Card>

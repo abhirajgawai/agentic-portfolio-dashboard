@@ -467,6 +467,64 @@ export function categoryValueBarsOption(opts: {
 }
 
 /**
+ * Allocation donut — a true ring (`radius: ['55%', '80%']`, not a filled
+ * pie), one slice per category. Direct on-chart labels stay off by design:
+ * the caller pairs this with a real legend list (exact numbers, never
+ * color-alone) beside/below it, same as every other chart in this app —
+ * the donut's job is just the at-a-glance shape of the whole.
+ *
+ * `colors` must already be RESOLVED concrete values (hex/oklch), not raw
+ * `var(--chart-N)` strings — this renders to a <canvas>, which can't resolve
+ * CSS custom properties the way DOM elements can (see getChartPalette()).
+ * `borderColor` should be the resolved `--card` value so the gap between
+ * slices reads as a gap, not a colored ring seam.
+ */
+export function donutOption(opts: {
+  labels: string[]
+  values: number[]
+  colors: string[]
+  borderColor?: string
+  masked?: boolean
+}): EChartsOption {
+  return {
+    backgroundColor: 'transparent',
+    textStyle: baseTextStyle,
+    tooltip: {
+      trigger: 'item',
+      backgroundColor: 'rgba(20,20,24,0.92)',
+      borderColor: 'rgba(255,255,255,0.1)',
+      textStyle: { color: '#e8e8ea' },
+      formatter: (p: unknown) => {
+        const { name, percent } = p as { name: string; percent: number }
+        return opts.masked ? `${name}: ${MASK_TEXT}` : `${name}: ${percent}%`
+      },
+    },
+    series: [
+      {
+        name: 'Allocation',
+        type: 'pie',
+        radius: ['55%', '80%'],
+        avoidLabelOverlap: false,
+        itemStyle: {
+          borderColor: opts.borderColor ?? 'transparent',
+          borderWidth: 2,
+        },
+        label: { show: false },
+        labelLine: { show: false },
+        emphasis: {
+          scaleSize: 4,
+        },
+        data: opts.labels.map((name, i) => ({
+          name,
+          value: opts.values[i],
+          itemStyle: { color: opts.colors[i % opts.colors.length] },
+        })),
+      },
+    ],
+  }
+}
+
+/**
  * Resolve the theme-aware chart palette from the CSS custom properties
  * (--chart-1..9) set on :root / .dark in index.css. Falls back to the
  * hardcoded CATEGORY_COLORS if the vars aren't present (e.g. SSR).
@@ -482,6 +540,17 @@ export function getChartPalette(): string[] {
     if (colors.length) return colors
   }
   return CATEGORY_COLORS
+}
+
+/** Resolve a single CSS custom property (e.g. `--card`) to its current
+ *  computed value, for the same canvas-can't-read-var() reason as
+ *  getChartPalette() above. Falls back to `fallback` when unavailable. */
+export function resolveThemeColor(varName: string, fallback: string): string {
+  if (typeof document !== 'undefined') {
+    const v = getComputedStyle(document.documentElement).getPropertyValue(varName).trim()
+    if (v) return v
+  }
+  return fallback
 }
 
 /** ECharts linear-gradient object for area fills (top → bottom fade). */
