@@ -22,7 +22,7 @@
 import { useMemo, useState } from "react"
 
 import { EChart } from "@/components/charts/EChart"
-import { journeyStackedAreaOption } from "@/components/charts/options"
+import { journeyLinesOption } from "@/components/charts/options"
 import { PLATFORM_CHART_INDEX } from "@/components/overview/AllocationDonuts"
 import { Card, CardContent } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -106,8 +106,11 @@ export function JourneyChart({ history }: { history: History }) {
 
   const option = useMemo(
     () =>
-      journeyStackedAreaOption({
+      journeyLinesOption({
         dates: sliced.dates,
+        totalLabel: "Net worth",
+        totalData: sliced.total,
+        totalColor: "var(--chart-journey)",
         series: sliced.platforms.map((p) => ({ id: p.id, label: platformLabel(p.id), data: p.data })),
         colorIndex: (id) => PLATFORM_CHART_INDEX[id] ?? 0,
         formatter: formatInrCompact,

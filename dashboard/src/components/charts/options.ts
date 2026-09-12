@@ -133,29 +133,58 @@ export function trendAreaOption(opts: {
 }
 
 /**
- * Journey chart — net worth over time, stacked by platform (Ledger Gold
- * redesign, replacing a single flat total line with a composition story:
- * which platforms are actually driving growth). Straight segments, not
- * smoothed — a snapshot is an observation, not a signal to interpolate
- * between (same principle the previous single-line chart documented).
- * Colors are per-platform via `opts.colorIndex`, keyed on the SAME
- * `PLATFORM_CHART_INDEX` map Allocation/Account Roads use, so a platform's
- * band here is the same color as its bar/road elsewhere in the app.
+ * Journey chart — net worth over time, by platform (Ledger Gold redesign).
+ * Plain lines, no area fill — a first pass used a stacked area (solid color
+ * fields), which read as too heavy against the warm ivory/gold surface; thin
+ * lines let the background carry the page and only the line color carries
+ * identity. The Total line is bold and in the brand accent (the headline
+ * read); platform lines are thinner context, each colored via
+ * `opts.colorIndex`, keyed on the SAME `PLATFORM_CHART_INDEX` map Allocation/
+ * Account Roads use, so a platform's line here is the same color as its bar/
+ * road elsewhere in the app. Straight segments, not smoothed — a snapshot is
+ * an observation, not a signal to interpolate between.
  */
-export function journeyStackedAreaOption(opts: {
+export function journeyLinesOption(opts: {
   dates: string[]
+  totalLabel: string
+  totalData: number[]
+  totalColor: string
   series: Array<{ id: string; label: string; data: number[] }>
   colorIndex: (platformId: string) => number
   formatter: (value: number) => string
   masked?: boolean
-  /** Horizontal goal line(s) — rendered as a markLine on the top (last)
-   *  series so it draws above every stacked band. */
+  /** Horizontal goal line(s) — rendered as a markLine on the Total series. */
   goalLines?: Array<{ value: number; label: string }>
 }): EChartsOption {
   const valueFmt = (v: number) => (opts.masked ? MASK_TEXT : opts.formatter(v))
   const palette = getChartPalette()
   const colorFor = (platformId: string) => palette[opts.colorIndex(platformId) % palette.length] ?? palette[0] ?? '#6f7cff'
-  const topSeriesIndex = opts.series.length - 1
+
+  // No emphasis/blur override needed here (unlike the earlier stacked-area
+  // version) — plain non-stacked lines never hit ECharts' "blur every series
+  // to near-zero on axis hover" behavior, that was specific to stacked series
+  // under an axis-triggered tooltip.
+  const lineSeries = (name: string, data: number[], color: string, width: number, goalLines?: EChartsOption['series']) => ({
+    name,
+    type: 'line' as const,
+    data,
+    smooth: false,
+    symbol: 'none',
+    lineStyle: { width, color },
+    itemStyle: { color },
+    markLine: goalLines,
+  })
+
+  const goalMarkLine =
+    opts.goalLines?.length
+      ? ({
+          silent: true,
+          symbol: 'none',
+          lineStyle: { color: resolveThemeColor('--warning', 'oklch(0.62 0.15 85)'), type: 'dashed' as const, width: 1.5 },
+          label: { formatter: (p: { data?: { label?: string } }) => p.data?.label ?? '', color: resolveThemeColor('--warning', 'oklch(0.62 0.15 85)'), fontSize: 10, position: 'insideEndTop' as const },
+          data: opts.goalLines.map((g) => ({ yAxis: g.value, label: { formatter: g.label } })),
+        } as unknown as EChartsOption['series'])
+      : undefined
 
   return {
     backgroundColor: 'transparent',
@@ -163,27 +192,26 @@ export function journeyStackedAreaOption(opts: {
     tooltip: {
       trigger: 'axis',
       ...tooltipTheme(),
-      // Total first, then each platform's contribution — the stacked-area
-      // reason for existing is "how did each platform add up to this total".
       formatter: (params: unknown) => {
         const rows = Array.isArray(params) ? params : [params]
         if (rows.length === 0) return ''
         const date = (rows[0] as { axisValueLabel?: string }).axisValueLabel ?? ''
-        const total = rows.reduce((sum: number, r) => sum + (Number((r as { value?: unknown }).value) || 0), 0)
-        const lines = rows
-          .slice()
-          .reverse() // stack order is bottom-up; show top-down (largest-on-top-of-visual) reading order
-          .map((r) => {
-            const row = r as { seriesName?: string; value?: unknown; color?: string }
-            return `<div style="display:flex;justify-content:space-between;gap:12px;">
+        const totalRow = rows.find((r) => (r as { seriesName?: string }).seriesName === opts.totalLabel)
+        const platformRows = rows.filter((r) => (r as { seriesName?: string }).seriesName !== opts.totalLabel)
+        const rowHtml = (r: unknown) => {
+          const row = r as { seriesName?: string; value?: unknown; color?: string }
+          return `<div style="display:flex;justify-content:space-between;gap:12px;">
               <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${row.color};margin-right:6px;"></span>${row.seriesName}</span>
               <span style="font-variant-numeric:tabular-nums;">${valueFmt(Number(row.value) || 0)}</span>
             </div>`
-          })
-          .join('')
-        return `<div style="font-weight:600;margin-bottom:4px;">${date}</div>${lines}<div style="display:flex;justify-content:space-between;gap:12px;margin-top:4px;padding-top:4px;border-top:1px solid ${axisLine()};font-weight:600;">
-          <span>Total</span><span style="font-variant-numeric:tabular-nums;">${valueFmt(total)}</span>
-        </div>`
+        }
+        const platformLines = platformRows.map(rowHtml).join('')
+        const totalHtml = totalRow
+          ? `<div style="display:flex;justify-content:space-between;gap:12px;margin-top:4px;padding-top:4px;border-top:1px solid ${axisLine()};font-weight:600;">
+              <span>${opts.totalLabel}</span><span style="font-variant-numeric:tabular-nums;">${valueFmt(Number((totalRow as { value?: unknown }).value) || 0)}</span>
+            </div>`
+          : ''
+        return `<div style="font-weight:600;margin-bottom:4px;">${date}</div>${platformLines}${totalHtml}`
       },
     },
     grid: { left: 8, right: 8, top: 34, bottom: 4, containLabel: true },
@@ -194,7 +222,7 @@ export function journeyStackedAreaOption(opts: {
       itemHeight: 10,
       icon: 'circle',
       textStyle: { color: chartText(), fontSize: 11 },
-      data: opts.series.map((s) => s.label),
+      data: [opts.totalLabel, ...opts.series.map((s) => s.label)],
     },
     xAxis: {
       type: 'category',
@@ -209,40 +237,10 @@ export function journeyStackedAreaOption(opts: {
       axisLabel: { color: chartText(), fontSize: 11, formatter: (v: number) => valueFmt(v) },
       splitLine: { lineStyle: { color: axisLine(), type: 'dashed' } },
     },
-    series: opts.series.map((s, i) => {
-      const color = colorFor(s.id)
-      return {
-        name: s.label,
-        type: 'line' as const,
-        stack: 'total',
-        data: s.data,
-        smooth: false,
-        symbol: 'none',
-        lineStyle: { width: 1.5, color },
-        areaStyle: { color, opacity: 0.88 },
-        itemStyle: { color },
-        // Explicitly disabled, not just omitted — ECharts' default hover
-        // behavior on a stacked series still blurs every band to near-zero
-        // opacity when trigger is 'axis' (there's no single "hovered"
-        // series to keep un-blurred the way item-trigger has), which made
-        // the whole chart appear to vanish on mouseover. `disabled: true`
-        // turns off ECharts' emphasis/blur state machine for this series
-        // entirely — the axis-pointer dashed line + tooltip still work,
-        // this only stops the color fade.
-        emphasis: { disabled: true },
-        blur: { areaStyle: { opacity: 0.88 }, lineStyle: { opacity: 1 } },
-        markLine:
-          i === topSeriesIndex && opts.goalLines?.length
-            ? {
-                silent: true,
-                symbol: 'none',
-                lineStyle: { color: resolveThemeColor('--warning', 'oklch(0.62 0.15 85)'), type: 'dashed' as const, width: 1.5 },
-                label: { formatter: (p: { data?: { label?: string } }) => p.data?.label ?? '', color: resolveThemeColor('--warning', 'oklch(0.62 0.15 85)'), fontSize: 10, position: 'insideEndTop' as const },
-                data: opts.goalLines.map((g) => ({ yAxis: g.value, label: { formatter: g.label } })),
-              }
-            : undefined,
-      }
-    }) as EChartsOption['series'],
+    series: [
+      lineSeries(opts.totalLabel, opts.totalData, opts.totalColor, 2.5, goalMarkLine),
+      ...opts.series.map((s) => lineSeries(s.label, s.data, colorFor(s.id), 1.5)),
+    ] as EChartsOption['series'],
   }
 }
 
