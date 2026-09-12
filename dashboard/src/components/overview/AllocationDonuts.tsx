@@ -57,7 +57,7 @@ function rankColorIndex(_item: NameValue, index: number): number {
  *  a raw `var(--chart-N)` string — ECharts renders to a <canvas>, which can't
  *  resolve CSS custom properties the way DOM elements can, so the palette
  *  needs to be resolved to concrete color values up front. */
-const PLATFORM_CHART_INDEX: Record<string, number> = {
+export const PLATFORM_CHART_INDEX: Record<string, number> = {
   zerodha: 0,
   moomoo: 1,
   groww: 2,

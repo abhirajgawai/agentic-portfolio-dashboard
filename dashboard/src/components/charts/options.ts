@@ -133,6 +133,111 @@ export function trendAreaOption(opts: {
 }
 
 /**
+ * Journey chart — net worth over time, stacked by platform (Ledger Gold
+ * redesign, replacing a single flat total line with a composition story:
+ * which platforms are actually driving growth). Straight segments, not
+ * smoothed — a snapshot is an observation, not a signal to interpolate
+ * between (same principle the previous single-line chart documented).
+ * Colors are per-platform via `opts.colorIndex`, keyed on the SAME
+ * `PLATFORM_CHART_INDEX` map Allocation/Account Roads use, so a platform's
+ * band here is the same color as its bar/road elsewhere in the app.
+ */
+export function journeyStackedAreaOption(opts: {
+  dates: string[]
+  series: Array<{ id: string; label: string; data: number[] }>
+  colorIndex: (platformId: string) => number
+  formatter: (value: number) => string
+  masked?: boolean
+  /** Horizontal goal line(s) — rendered as a markLine on the top (last)
+   *  series so it draws above every stacked band. */
+  goalLines?: Array<{ value: number; label: string }>
+}): EChartsOption {
+  const valueFmt = (v: number) => (opts.masked ? MASK_TEXT : opts.formatter(v))
+  const palette = getChartPalette()
+  const colorFor = (platformId: string) => palette[opts.colorIndex(platformId) % palette.length] ?? palette[0] ?? '#6f7cff'
+  const topSeriesIndex = opts.series.length - 1
+
+  return {
+    backgroundColor: 'transparent',
+    textStyle: { color: chartText(), fontFamily: 'inherit' },
+    tooltip: {
+      trigger: 'axis',
+      ...tooltipTheme(),
+      // Total first, then each platform's contribution — the stacked-area
+      // reason for existing is "how did each platform add up to this total".
+      formatter: (params: unknown) => {
+        const rows = Array.isArray(params) ? params : [params]
+        if (rows.length === 0) return ''
+        const date = (rows[0] as { axisValueLabel?: string }).axisValueLabel ?? ''
+        const total = rows.reduce((sum: number, r) => sum + (Number((r as { value?: unknown }).value) || 0), 0)
+        const lines = rows
+          .slice()
+          .reverse() // stack order is bottom-up; show top-down (largest-on-top-of-visual) reading order
+          .map((r) => {
+            const row = r as { seriesName?: string; value?: unknown; color?: string }
+            return `<div style="display:flex;justify-content:space-between;gap:12px;">
+              <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${row.color};margin-right:6px;"></span>${row.seriesName}</span>
+              <span style="font-variant-numeric:tabular-nums;">${valueFmt(Number(row.value) || 0)}</span>
+            </div>`
+          })
+          .join('')
+        return `<div style="font-weight:600;margin-bottom:4px;">${date}</div>${lines}<div style="display:flex;justify-content:space-between;gap:12px;margin-top:4px;padding-top:4px;border-top:1px solid ${axisLine()};font-weight:600;">
+          <span>Total</span><span style="font-variant-numeric:tabular-nums;">${valueFmt(total)}</span>
+        </div>`
+      },
+    },
+    grid: { left: 8, right: 8, top: 34, bottom: 4, containLabel: true },
+    legend: {
+      top: 0,
+      right: 0,
+      itemWidth: 10,
+      itemHeight: 10,
+      icon: 'circle',
+      textStyle: { color: chartText(), fontSize: 11 },
+      data: opts.series.map((s) => s.label),
+    },
+    xAxis: {
+      type: 'category',
+      boundaryGap: false,
+      data: opts.dates.map((d) => d.slice(5)),
+      axisLine: { lineStyle: { color: axisLine() } },
+      axisLabel: { color: chartText(), fontSize: 11 },
+      axisTick: { show: false },
+    },
+    yAxis: {
+      type: 'value',
+      axisLabel: { color: chartText(), fontSize: 11, formatter: (v: number) => valueFmt(v) },
+      splitLine: { lineStyle: { color: axisLine(), type: 'dashed' } },
+    },
+    series: opts.series.map((s, i) => {
+      const color = colorFor(s.id)
+      return {
+        name: s.label,
+        type: 'line' as const,
+        stack: 'total',
+        data: s.data,
+        smooth: false,
+        symbol: 'none',
+        lineStyle: { width: 1.5, color },
+        areaStyle: { color, opacity: 0.75 },
+        itemStyle: { color },
+        emphasis: { focus: 'series' as const },
+        markLine:
+          i === topSeriesIndex && opts.goalLines?.length
+            ? {
+                silent: true,
+                symbol: 'none',
+                lineStyle: { color: resolveThemeColor('--warning', 'oklch(0.62 0.15 85)'), type: 'dashed' as const, width: 1.5 },
+                label: { formatter: (p: { data?: { label?: string } }) => p.data?.label ?? '', color: resolveThemeColor('--warning', 'oklch(0.62 0.15 85)'), fontSize: 10, position: 'insideEndTop' as const },
+                data: opts.goalLines.map((g) => ({ yAxis: g.value, label: { formatter: g.label } })),
+              }
+            : undefined,
+      }
+    }) as EChartsOption['series'],
+  }
+}
+
+/**
  * Day-over-day change strip (Option A) — one labeled, sign-colored bar per
  * day. The literal "today vs past" comparison in numbers, paired below
  * trendAreaOption's line so the trend and the day-by-day moves that built it

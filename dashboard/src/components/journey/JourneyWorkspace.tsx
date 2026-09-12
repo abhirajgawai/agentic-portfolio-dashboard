@@ -160,29 +160,29 @@ export function JourneyWorkspace({
         />
       </motion.div>
 
-      {/* Chart (left, wide) + condensed rail (right, ~340px) — the rail only
-       *  carries the two "right now" cards (today's move, account snapshot),
-       *  so its height stays proportionate to the chart beside it instead of
-       *  towering over it. */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_340px]">
-        <motion.div variants={item} className="min-w-0 space-y-4">
+      {/* Chart (left, wide) + rail (right, ~340px) — two INDEPENDENTLY
+       *  flowing columns (flex, not a shared grid row), each sized to its
+       *  own content. A shared-row grid here previously forced the shorter
+       *  left column to stretch to the taller right rail's height, leaving
+       *  ~944px of dead ivory below the chart (QA finding I1). Goals +
+       *  Milestone Journal now live in the left column, under the chart —
+       *  the right rail (today's move + condensed account snapshot) is the
+       *  denser column, so front-loading the left column with more content
+       *  is what actually closes the gap, not a layout trick. */}
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
+        <motion.div variants={item} className="min-w-0 flex-1 space-y-4">
           <JourneyChart history={history.data} />
           <YearStrip history={history.data} />
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <GoalMilestones valueBase={latest.data.totals.valueBase} />
+            <MilestoneJournal history={history.data} />
+          </div>
         </motion.div>
-        <motion.div variants={item} className="space-y-4">
+        <motion.div variants={item} className="space-y-4 lg:w-[340px] lg:shrink-0">
           <TodayPanel latest={latest.data} alerts={alerts.data} />
           <AccountRoads history={history.data} variant="condensed" />
         </motion.div>
       </div>
-
-      {/* Goals + journal — promoted to a full-width row below the chart/rail
-       *  split (rather than stacked in the narrow rail) so they use the same
-       *  width the chart does, and so the page doesn't end in ~944px of dead
-       *  ivory below a short right rail. */}
-      <motion.div variants={item} className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <GoalMilestones valueBase={latest.data.totals.valueBase} />
-        <MilestoneJournal history={history.data} />
-      </motion.div>
     </motion.section>
   );
 }
