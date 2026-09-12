@@ -67,9 +67,22 @@ export function trendAreaOption(opts: {
    *  CATEGORY_COLORS fallback, so this stays token-consistent with every
    *  other themed chart on the page. */
   colors?: string[]
+  /** Horizontal goal line(s), drawn on the FIRST series (the one with the
+   *  area fill) so they sit against the headline total, not a breakdown line. */
+  goalLines?: Array<{ value: number; label: string }>
 }): EChartsOption {
   const fmt = opts.formatter ?? ((v: number) => String(v))
   const valueFmt = (v: number) => (opts.masked ? MASK_TEXT : fmt(v))
+  const goalMarkLine =
+    opts.goalLines?.length
+      ? ({
+          silent: true,
+          symbol: 'none',
+          lineStyle: { color: resolveThemeColor('--warning', 'oklch(0.62 0.15 85)'), type: 'dashed' as const, width: 1.5 },
+          label: { formatter: (p: { data?: { label?: string } }) => p.data?.label ?? '', color: resolveThemeColor('--warning', 'oklch(0.62 0.15 85)'), fontSize: 10, position: 'insideEndTop' as const },
+          data: opts.goalLines.map((g) => ({ yAxis: g.value, label: { formatter: g.label } })),
+        } as unknown as EChartsOption['series'])
+      : undefined
   return {
     backgroundColor: 'transparent',
     textStyle: { color: chartText(), fontFamily: 'inherit' },
@@ -128,7 +141,8 @@ export function trendAreaOption(opts: {
               formatter: (p: { value: number }) => fmt(p.value),
             }
           : { show: false },
-    })),
+      markLine: i === 0 ? goalMarkLine : undefined,
+    })) as EChartsOption['series'],
   }
 }
 

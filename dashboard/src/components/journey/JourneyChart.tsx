@@ -1,28 +1,23 @@
 "use client"
 
 /**
- * Hero journey chart — net worth over time, stacked by platform.
+ * Hero journey chart — net worth over time, by platform.
  *
- * Ledger Gold redesign (2026-09-12, second pass): replaces the original
- * single-line/flat-area chart with a stacked area showing which platforms
- * are actually driving the total — a richer "trend over time" read than one
- * flat gold line hugging a near-constant total, per dataviz's own guidance
- * that line/area is the right FORM for this job; the redesign is in what
- * the area encodes (composition, not just total), not in switching to an
- * unrelated chart type. Built on ECharts (this app's existing charting
- * investment — see `docs/design/spec-ledger-gold` for why a third charting
- * library was avoided) rather than the previous @visx implementation, since
- * a multi-series stacked area with axis tooltips is ECharts' native case and
- * hand-rolling path-morph tweening for N stacked series was not worth
- * re-deriving from scratch. Straight (non-smoothed) segments are kept
- * deliberately — a snapshot is an observation, not a signal to interpolate
- * between.
+ * Ledger Gold redesign (2026-09-12, third pass): matches the exact visual
+ * recipe of Allocation's "Portfolio value over time" (`TrendChart.tsx`) per
+ * direct user request — a bold gold `Net worth` line with a gradient area
+ * fill, thin plain lines for the platform breakdown, and a separate
+ * day-over-day change bar strip underneath, all built on the same
+ * `trendAreaOption`/`dayChangeBarOption` builders `TrendChart.tsx` uses.
+ * (Earlier passes here tried a stacked area, then an all-thin-lines chart;
+ * this pass converges Journey and Allocation onto one shared chart language
+ * instead of Journey having its own bespoke treatment.)
  */
 
 import { useMemo, useState } from "react"
 
 import { EChart } from "@/components/charts/EChart"
-import { journeyLinesOption, resolveThemeColor } from "@/components/charts/options"
+import { dayChangeBarOption, getChartPalette, resolveThemeColor, trendAreaOption } from "@/components/charts/options"
 import { PLATFORM_CHART_INDEX } from "@/components/overview/AllocationDonuts"
 import { Card, CardContent } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -31,9 +26,7 @@ import { useGoalsData } from "@/lib/data"
 import { formatInrCompact, platformLabel } from "@/lib/format"
 import { usePrivacy } from "@/lib/privacy"
 import { useTheme } from "@/lib/theme"
-import { cn } from "@/lib/utils"
 import type { History } from "@/types/contract"
-import { DeltaChipRail } from "./DeltaChipRail"
 import { EmptyGlyph } from "./EmptyGlyph"
 import { formatShortDate } from "./journal"
 import { useInView } from "./useInView"
@@ -48,7 +41,9 @@ const RANGES: ReadonlyArray<{ key: JourneyRange; days: number | null }> = [
   { key: "All", days: null },
 ]
 
-const SPARSE_THRESHOLD = 8
+/** Matches TrendChart's thresholds — labels/change-strip collide into noise past these. */
+const LABEL_MAX_POINTS = 12
+const CHANGE_STRIP_MAX_POINTS = 20
 
 /** Slice every per-platform series (plus the derived total) to the trailing window. */
 function sliceHistory(
@@ -85,7 +80,6 @@ export function JourneyChart({ history }: { history: History }) {
   const sliced = useMemo(() => sliceHistory(history, range), [history, range])
   const isEmpty = history.dates.length < 2
   const isShort = sliced.total.length < 2
-  const mode: "sparse" | "dense" = sliced.total.length < SPARSE_THRESHOLD ? "sparse" : "dense"
   const firstDate = sliced.dates[0]
   const lastDate = sliced.dates[sliced.dates.length - 1]
   const firstValue = sliced.total[0] ?? 0
@@ -106,35 +100,44 @@ export function JourneyChart({ history }: { history: History }) {
 
   const option = useMemo(
     () =>
-      journeyLinesOption({
+      trendAreaOption({
         dates: sliced.dates,
-        totalLabel: "Net worth",
-        totalData: sliced.total,
-        // resolveThemeColor(), not a raw "var(--chart-journey)" string — the
-        // chart renders to <canvas>, which cannot resolve a live CSS custom
-        // property the way DOM elements can (same root cause as the earlier
-        // hardcoded-canvas-color fix). Passing the unresolved var() string
-        // rendered as an invalid canvas color (a flat gray/white line)
-        // instead of the intended bronze-gold.
-        totalColor: resolveThemeColor("--chart-journey", "#B8823D"),
-        series: sliced.platforms.map((p) => ({ id: p.id, label: platformLabel(p.id), data: p.data })),
-        colorIndex: (id) => PLATFORM_CHART_INDEX[id] ?? 0,
+        series: [
+          { name: "Net worth", data: sliced.total, area: true },
+          ...sliced.platforms.map((p) => ({ name: platformLabel(p.id), data: p.data })),
+        ],
         formatter: formatInrCompact,
         masked,
+        showLabels: sliced.dates.length <= LABEL_MAX_POINTS,
+        // Positional, not a colorIndex lookup — sliced.platforms is already
+        // sorted by PLATFORM_CHART_INDEX (see sliceHistory above), so the
+        // resolved --chart-1..9 palette lines up with the same platform ->
+        // color mapping Allocation/Account Roads use.
+        colors: [resolveThemeColor("--chart-journey", "#B8823D"), ...getChartPalette()],
         goalLines: visibleGoals.map((g) => ({
           value: g.targetAmount,
           label: masked ? "Goal" : `Goal: ${formatInrCompact(g.targetAmount)}`,
         })),
       }),
-    // resolvedTheme is a dependency on purpose (not read directly below) — ECharts
-    // renders to canvas, so every color the option builder resolves via
-    // getComputedStyle() must be recomputed whenever the theme actually
-    // changes, not just when the data does (Ledger Gold final-review fix #1).
+    // resolvedTheme isn't read directly, but resolveThemeColor()/getChartPalette()
+    // read live CSS custom properties off <html> — this dep re-runs the memo on
+    // a theme toggle instead of leaving stale colors until an unrelated re-render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [sliced, masked, visibleGoals, resolvedTheme]
   )
 
-  const height = mode === "sparse" ? 220 : 320
+  const changeOption = useMemo(() => {
+    const values = sliced.total
+    if (values.length < 2 || values.length > CHANGE_STRIP_MAX_POINTS) return null
+    const changes = values.slice(1).map((v, i) => v - (values[i] ?? 0))
+    return dayChangeBarOption({
+      dates: sliced.dates.slice(1),
+      changes,
+      formatter: formatInrCompact,
+      masked,
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sliced, masked, resolvedTheme])
 
   return (
     <Card className="shadow-md">
@@ -178,13 +181,14 @@ export function JourneyChart({ history }: { history: History }) {
               </p>
             )}
             <div ref={ref} role="img" aria-label={ariaLabel} className="w-full">
-              {inView ? (
-                <EChart option={option} height={height} />
-              ) : (
-                <Skeleton className={cn("w-full", mode === "sparse" ? "h-[220px]" : "h-80")} />
-              )}
+              {inView ? <EChart option={option} height={320} /> : <Skeleton className="h-80 w-full" />}
             </div>
-            {mode === "sparse" && <DeltaChipRail dates={sliced.dates} values={sliced.total} masked={masked} />}
+            {changeOption && (
+              <div className="mt-2">
+                <p className="mb-1 text-[10px] text-muted-foreground">Day-over-day change</p>
+                <EChart option={changeOption} height={90} />
+              </div>
+            )}
           </>
         )}
       </CardContent>
