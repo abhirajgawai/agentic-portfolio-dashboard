@@ -68,14 +68,23 @@ export function buildStalenessBuckets(latest: Latest, now: Date): StalenessBucke
       key: 'zerodha',
       label: 'Zerodha',
       asOf: latest.platforms.zerodha?.asOf ?? null,
-      stale: latest.platforms.zerodha?.stale ?? true,
+      // isStaleNotToday, not the export-level 2-day `.stale` flag: that
+      // threshold is calibrated for a platform that refreshes itself on a
+      // schedule, but Zerodha/Moomoo snapshots here are deliberately
+      // on-demand only (no scheduler — the laptop isn't always on, see
+      // scripts/scheduler/register_tasks.ps1's header). The user runs these
+      // manually each session, so "haven't refreshed today" is the signal
+      // that matters, same cadence as the CAS/manual buckets below — not
+      // "more than 2 days old," which stayed silent even on a day with zero
+      // snapshots as long as yesterday's was within the window.
+      stale: isStaleNotToday(latest.platforms.zerodha?.asOf ?? null, now),
       hint: 'take a snapshot on Journey',
     },
     {
       key: 'moomoo',
       label: 'Moomoo',
       asOf: latest.platforms.moomoo?.asOf ?? null,
-      stale: latest.platforms.moomoo?.stale ?? true,
+      stale: isStaleNotToday(latest.platforms.moomoo?.asOf ?? null, now),
       hint: 'take a snapshot on Journey',
     },
     {
