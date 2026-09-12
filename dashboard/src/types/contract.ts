@@ -113,6 +113,13 @@ export const HistorySchema = z.object({
   byGeography: z.record(z.string(), z.array(z.number())),
   /** Array per platform, aligned by index with `dates`. */
   byPlatform: z.record(z.string(), z.array(z.number())),
+  /** Array per (platform, account_ref), key = "platform:account_ref", aligned
+   *  by index with `dates`. Only multi-account platforms appear here (a
+   *  single-account platform's one account IS byPlatform[platform], so it's
+   *  omitted to avoid a duplicate "platform:" key) — e.g. "groww:folio" (the
+   *  automated CAS/MF leg) vs "groww:manual" (the hand-entered equities
+   *  total) tracked as separate daily series instead of one summed line. */
+  byAccount: z.record(z.string(), z.array(z.number())),
 })
 
 /* ------------------------------------------------------------------ */

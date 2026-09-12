@@ -144,9 +144,29 @@ def portfolio_series(conn: Any, base: str) -> dict[str, Any]:
             )
         totals.append(round(sum(platform_values[platform][-1] for platform in platforms), 2))
 
+    # Per-account breakdown (M-5): account_values already carries this at full
+    # daily granularity (built above for the carry-forward fix), but was never
+    # returned - a platform with multiple independently-tracked accounts (e.g.
+    # groww's automated CAS folio import vs. its hand-entered manual equities
+    # total) had no way to chart those two legs separately, only their summed
+    # byPlatform total. Keyed "platform:account_ref"; single-account platforms
+    # (a bare "" account_ref, e.g. zerodha) are omitted here since byPlatform
+    # already IS that one account's series - exporting "zerodha:" would just
+    # duplicate byPlatform.zerodha under an uglier key.
+    # sorted(): `accounts` is a set, so its (and account_values'/its dict-
+    # comprehension's) iteration order is not guaranteed stable across
+    # separate process runs (only within one) - sort explicitly, matching
+    # this file's own "platforms/geographies sorted" determinism guarantee.
+    by_account: dict[str, list[float]] = {
+        f"{platform}:{ref}": account_values[(platform, ref)]
+        for platform, ref in sorted(accounts)
+        if ref
+    }
+
     return {
         "dates": dates,
         "portfolioValueBase": totals,
         "byGeography": geography_values,
         "byPlatform": platform_values,
+        "byAccount": by_account,
     }

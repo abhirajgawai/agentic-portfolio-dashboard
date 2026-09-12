@@ -62,10 +62,12 @@ ok = report('history.json', () => {
   const arraysOk =
     history.portfolioValueBase.length === len &&
     Object.values(history.byGeography).every((a) => a.length === len) &&
-    Object.values(history.byPlatform).every((a) => a.length === len)
+    Object.values(history.byPlatform).every((a) => a.length === len) &&
+    Object.values(history.byAccount).every((a) => a.length === len)
   console.log(
     `ok   history.json: ${len} dates (${history.dates[0]} .. ${history.dates[len - 1]})` +
       ` platforms=${Object.keys(history.byPlatform).length}` +
+      ` accounts=${Object.keys(history.byAccount).length}` +
       ` geographies=${Object.keys(history.byGeography).length} aligned=${arraysOk}`,
   )
   if (!arraysOk) throw new Error('series arrays not aligned with dates')

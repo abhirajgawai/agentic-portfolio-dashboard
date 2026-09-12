@@ -153,6 +153,53 @@ def test_series_carries_complete_multi_instrument_platform_snapshot(db) -> None:
         )
 
 
+def test_series_by_account_splits_multi_account_platforms(db) -> None:
+    """M-5: a platform with multiple independently-tracked accounts (e.g.
+    groww's automated CAS folio import vs. its hand-entered manual equities
+    total) must be chartable as separate lines, not just their summed
+    byPlatform total - that summed-only view is what made the two legs
+    indistinguishable in every chart before byAccount existed."""
+    conn = connect(db)
+    try:
+        # groww:folio only on day 1, groww:manual on both days (day 2 has a
+        # fresh manual entry) - exercises independent per-account carry-forward.
+        spec = [
+            ("2026-08-06", "groww", "folio", 500.0),
+            ("2026-08-06", "groww", "manual", 100.0),
+            ("2026-08-07", "groww", "manual", 120.0),
+            ("2026-08-06", "zerodha", "", 50.0),  # single-account platform
+        ]
+        for i, (day, platform, acc_ref, value) in enumerate(spec):
+            run_id = writer.write_run(
+                conn, platform, day, f"run-{i}-{platform}-{acc_ref}", "ok", rows=1, is_eod=True
+            )
+            acc = writer.ensure_account(conn, platform, account_ref=acc_ref)
+            inst = writer.ensure_instrument(
+                conn, platform, f"{platform.upper()}-{acc_ref or 'X'}-{i}",
+                currency="INR", geography="IN",
+            )
+            writer.upsert_position_snapshot(
+                conn, run_id, acc, inst, None, day,
+                quantity=1.0, avg_cost=value, price=value,
+                cost_value_ccy=value, market_value_ccy=value, market_value_base=value,
+                cost_value_base=value,
+            )
+        series = portfolio_series(conn, "INR")
+    finally:
+        conn.close()
+
+    assert series["dates"] == ["2026-08-06", "2026-08-07"]
+    # folio carries its day-1 value forward on day 2 (no new folio row that day).
+    assert series["byAccount"]["groww:folio"] == [500.0, 500.0]
+    assert series["byAccount"]["groww:manual"] == [100.0, 120.0]
+    # byPlatform is still the sum of both accounts, unchanged by this feature.
+    assert series["byPlatform"]["groww"] == [600.0, 620.0]
+    # A single-account platform (empty account_ref) is NOT duplicated into
+    # byAccount under a "zerodha:" key - byPlatform.zerodha already IS it.
+    assert "zerodha:" not in series["byAccount"]
+    assert not any(key.startswith("zerodha:") for key in series["byAccount"])
+
+
 def test_series_deterministic_sorted_keys(db) -> None:
     conn = connect(db)
     try:

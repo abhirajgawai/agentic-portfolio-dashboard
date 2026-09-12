@@ -16,6 +16,7 @@
 
 import { CasImportScreen } from '@/components/cas/CasImportScreen'
 import { ManualEquitiesScreen } from '@/components/holdings/ManualEquitiesScreen'
+import { ManualEquitiesTrendChart } from '@/components/holdings/ManualEquitiesTrendChart'
 import { PageHeader } from '@/components/layout/PageHeader'
 
 export function GrowwSharekhanDataScreen() {
@@ -29,6 +30,8 @@ export function GrowwSharekhanDataScreen() {
       <CasImportScreen />
 
       <ManualEquitiesScreen />
+
+      <ManualEquitiesTrendChart />
     </div>
   )
 }
