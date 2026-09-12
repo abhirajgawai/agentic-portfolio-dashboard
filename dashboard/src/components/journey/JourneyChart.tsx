@@ -22,7 +22,7 @@
 import { useMemo, useState } from "react"
 
 import { EChart } from "@/components/charts/EChart"
-import { journeyLinesOption } from "@/components/charts/options"
+import { journeyLinesOption, resolveThemeColor } from "@/components/charts/options"
 import { PLATFORM_CHART_INDEX } from "@/components/overview/AllocationDonuts"
 import { Card, CardContent } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -110,7 +110,13 @@ export function JourneyChart({ history }: { history: History }) {
         dates: sliced.dates,
         totalLabel: "Net worth",
         totalData: sliced.total,
-        totalColor: "var(--chart-journey)",
+        // resolveThemeColor(), not a raw "var(--chart-journey)" string — the
+        // chart renders to <canvas>, which cannot resolve a live CSS custom
+        // property the way DOM elements can (same root cause as the earlier
+        // hardcoded-canvas-color fix). Passing the unresolved var() string
+        // rendered as an invalid canvas color (a flat gray/white line)
+        // instead of the intended bronze-gold.
+        totalColor: resolveThemeColor("--chart-journey", "#B8823D"),
         series: sliced.platforms.map((p) => ({ id: p.id, label: platformLabel(p.id), data: p.data })),
         colorIndex: (id) => PLATFORM_CHART_INDEX[id] ?? 0,
         formatter: formatInrCompact,
