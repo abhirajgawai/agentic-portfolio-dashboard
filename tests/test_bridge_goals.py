@@ -82,6 +82,38 @@ def test_goal_create_ok_shape_and_export_rerun():
     assert any("export_json.py" in part for part in export_cmd)
 
 
+def test_goal_create_readback_survives_oklch_color():
+    """Regression: a goal color can be an oklch()/rgb()/hsl() CSS function,
+    which contains internal spaces (e.g. "oklch(0.55 0.18 262)"). The
+    readback regex used to assume a single whitespace-free token and broke
+    on this, so goal_create returned a 502 "created but could not be read
+    back" even though the CLI write itself succeeded (bug hit live via the
+    Journey page's goal dialog, whose color swatches are the app's own
+    --chart-N tokens - oklch in this repo before the Ledger Gold redesign,
+    and still a legitimate color format going forward)."""
+    stdout = (
+        "#9  2cr  target=20,000,000.00  color=oklch(0.55 0.18 262)\n"
+        "#10  First 1.5cr  target=15,000,000.00  color=oklch(0.55 0.18 262)"
+        " crossed_at=2026-09-12T04:57:28+00:00\n"
+    )
+    fake = _fake_run(goal_stdout=stdout)
+    with mock.patch("subprocess.run", new=fake), TestClient(app) as client:
+        resp = client.post(
+            "/api/goals",
+            json={"label": "First 1.5cr", "targetAmount": 15000000, "color": "oklch(0.55 0.18 262)"},
+        )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["goal"] == {
+        "id": 10,
+        "label": "First 1.5cr",
+        "targetAmount": 15000000.0,
+        "color": "oklch(0.55 0.18 262)",
+        "crossedAt": "2026-09-12T04:57:28+00:00",
+    }
+
+
 def test_goal_create_without_color_omits_flag():
     fake = _fake_run()
     with mock.patch("subprocess.run", new=fake), TestClient(app) as client:
@@ -153,6 +185,23 @@ def test_goal_update_partial_passes_only_given_fields():
     # readback + export still run after a successful mutation
     assert fake.calls[1][3:5] == ["goal", "list"]
     assert any("export_json.py" in part for part in fake.calls[2])
+
+
+def test_goal_update_returns_the_edited_goal_not_the_newest():
+    """Regression: readback used a max-id ("newest goal") heuristic for both
+    create AND update. That's correct for create (the just-added row is
+    always the highest id) but wrong for update - PATCH can target any
+    existing goal. Editing the OLDER of two goals returned the NEWER goal's
+    data in the response body (bug hit live: PATCH /api/goals/9 with goal
+    #10 also present returned goal #10's label/target/color, not #9's)."""
+    fake = _fake_run(goal_stdout=GOAL_LIST_STDOUT)  # #2 Car, #7 Emergency fund (7 is max id)
+    with mock.patch("subprocess.run", new=fake), TestClient(app) as client:
+        resp = client.patch("/api/goals/2", json={"label": "Car (used)"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["goal"]["id"] == 2
+    assert body["goal"]["label"] == "Car"  # from GOAL_LIST_STDOUT's #2 row, not #7's
 
 
 def test_goal_update_unknown_id_clean_404():

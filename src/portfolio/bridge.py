@@ -677,17 +677,32 @@ class GoalUpdateRequest(BaseModel):
 #   #3  Emergency fund  target=5,00,000.00  color=#6f7cff [crossed_at=<iso>]
 _GOAL_LINE_RE = re.compile(
     r"^#(?P<id>\d+)\s+(?P<label>.+?)\s+target=(?P<target>[\d,]+(?:\.\d+)?)"
-    r"\s+color=(?P<color>\S+?)(?:\s+crossed_at=(?P<crossed>.+))?$"
+    # `.+?` (not `\S+`) — a goal color can be an oklch()/rgb()/hsl() CSS
+    # function, which contains internal spaces (e.g. "oklch(0.55 0.18 262)");
+    # `\S+` stopped at the first space and broke the whole line match, so a
+    # freshly created/updated goal with a non-hex color could never be read
+    # back (bridge.py's goal_create/goal_update then reported "created but
+    # could not be read back" even though the CLI write itself succeeded).
+    r"\s+color=(?P<color>.+?)(?:\s+crossed_at=(?P<crossed>.+))?$"
 )
 
 
-def _goal_from_list_output(stdout: str) -> dict | None:
-    """Newest goal (max id) parsed from `portfolio goal list` output.
+def _goal_from_list_output(stdout: str, *, goal_id: int | None = None) -> dict | None:
+    """Parse one goal row out of `portfolio goal list` output.
 
     Readback choice: the CLI is owned elsewhere and prints human lines only,
     so the bridge parses them rather than touching SQLite directly (hard rule)
     or editing another owner's file. PATCH needs this too - a partial update
     means the bridge does not know the untouched fields.
+
+    `goal_id=None` (create path): return the newest goal (max id) - the just-
+    created row is always the highest id in the listing.
+    `goal_id=<id>` (update path): return THAT goal specifically. The max-id
+    heuristic is wrong here - PATCH can target any existing goal, not only
+    the newest one, and picking max-id silently returned a DIFFERENT goal's
+    data whenever the edited goal wasn't already the highest id (found live:
+    editing goal #9 while goal #10 existed returned #10's label/target/color
+    in the response body).
     """
     best: dict | None = None
     for line in stdout.splitlines():
@@ -701,6 +716,10 @@ def _goal_from_list_output(stdout: str) -> dict | None:
             "color": m.group("color"),
             "crossedAt": m.group("crossed"),
         }
+        if goal_id is not None:
+            if goal["id"] == goal_id:
+                return goal
+            continue
         if best is None or goal["id"] > best["id"]:
             best = goal
     return best
@@ -831,7 +850,7 @@ async def goal_update(goal_id: int, req: GoalUpdateRequest) -> JSONResponse:
             return _goal_cli_error(result, "update")
 
         listing = _run_goal_cli(["list"])
-        goal = _goal_from_list_output(listing.stdout or "")
+        goal = _goal_from_list_output(listing.stdout or "", goal_id=goal_id)
 
         export = _run_export_cli()
         if export.returncode != 0:
