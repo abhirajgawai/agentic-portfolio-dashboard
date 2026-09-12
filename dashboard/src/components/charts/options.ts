@@ -219,9 +219,18 @@ export function journeyStackedAreaOption(opts: {
         smooth: false,
         symbol: 'none',
         lineStyle: { width: 1.5, color },
-        areaStyle: { color, opacity: 0.75 },
+        areaStyle: { color, opacity: 0.88 },
         itemStyle: { color },
-        emphasis: { focus: 'series' as const },
+        // Explicitly disabled, not just omitted — ECharts' default hover
+        // behavior on a stacked series still blurs every band to near-zero
+        // opacity when trigger is 'axis' (there's no single "hovered"
+        // series to keep un-blurred the way item-trigger has), which made
+        // the whole chart appear to vanish on mouseover. `disabled: true`
+        // turns off ECharts' emphasis/blur state machine for this series
+        // entirely — the axis-pointer dashed line + tooltip still work,
+        // this only stops the color fade.
+        emphasis: { disabled: true },
+        blur: { areaStyle: { opacity: 0.88 }, lineStyle: { opacity: 1 } },
         markLine:
           i === topSeriesIndex && opts.goalLines?.length
             ? {
