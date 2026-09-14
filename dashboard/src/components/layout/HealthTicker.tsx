@@ -45,6 +45,7 @@ export function HealthTicker() {
     (h) => h.assetClass === 'mutual_fund' || h.assetClass === 'etf',
   ).length
   const runsOk = Boolean(data?.asOf)
+  const freshPlatformCount = platformFreshness.filter((platform) => !platform.isStale).length
 
   // Agent status pill — reflects the bridge health poll. 'backend-offline' is
   // deliberately a DISTINCT label from 'agent offline' so the user can tell
@@ -97,10 +98,31 @@ export function HealthTicker() {
 
   return (
     <footer
-      className="flex items-center gap-x-4 gap-y-1 border-t bg-muted/30 px-4 py-1.5 text-xs text-muted-foreground overflow-hidden"
+      className="min-w-0 border-t bg-muted/30 px-3 py-1.5 text-xs text-muted-foreground sm:px-4"
       role="status"
       aria-live="polite"
     >
+      {/* A phone gets one honest health summary; the complete status stream
+          remains available from the small breakpoint upward. */}
+      <div className="flex min-w-0 items-center gap-2 sm:hidden">
+        <Clock className="size-3 shrink-0 opacity-50" aria-hidden="true" />
+        <span className="min-w-0 truncate">
+          Data {formatAsOf(data?.asOf)} · {freshPlatformCount}/{platformFreshness.length} platforms fresh
+        </span>
+        <span
+          className={cn('ml-auto inline-flex shrink-0 items-center gap-1 font-medium', agentPill.color)}
+          title={agentPill.tip}
+        >
+          <span className={cn('size-1.5 rounded-full', agentPill.dot)} aria-hidden="true" />
+          {agentPill.label}
+        </span>
+      </div>
+
+      <div
+        className="hidden min-w-0 items-center gap-x-4 gap-y-1 overflow-x-auto sm:flex"
+        role="group"
+        aria-label="Detailed health status"
+      >
       {/* ==== LAST REFRESH (live export stamp, dual timezone) ==== */}
       <span className="flex items-center gap-1.5 shrink-0">
         <Clock className="size-3 opacity-50" />
@@ -199,6 +221,7 @@ export function HealthTicker() {
           </span>
           {!runsOk && <AlertCircle className="size-3 text-loss" />}
         </span>
+      </div>
       </div>
     </footer>
   )

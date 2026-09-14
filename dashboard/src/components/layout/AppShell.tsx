@@ -58,7 +58,7 @@ export function AppShell() {
   }, [theme])
 
   return (
-    <div className="flex flex-col h-screen bg-background text-foreground">
+    <div className="flex h-dvh min-h-dvh w-full min-w-0 max-w-full flex-col bg-background text-foreground">
       {/* ==== HEADER (with workspace tabs) ==== */}
       <Header
         chatOpen={chatOpen}
@@ -72,7 +72,7 @@ export function AppShell() {
       <RefreshNotice health={health} manualRefreshCount={manualRefreshCount} />
 
       {/* ==== WORKSPACE CONTENT (full width, no sidebars) ==== */}
-      <div className="relative z-0 flex h-0 flex-1">
+      <div className="relative z-0 flex h-0 min-w-0 max-w-full flex-1">
         <WorkspaceCenter
           workspace={workspace}
           setTransientDossier={setTransientDossier}

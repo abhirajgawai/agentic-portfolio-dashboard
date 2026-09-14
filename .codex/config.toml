@@ -1,0 +1,5 @@
+# This repository is personal and trusted. Run Codex without interactive approval
+# prompts and without sandbox escalation failures. AGENTS.md and the project's
+# read-only broker/tool guardrails still govern what agents may implement or invoke.
+approval_policy = "never"
+sandbox_mode = "danger-full-access"

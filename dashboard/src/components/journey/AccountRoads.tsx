@@ -88,7 +88,7 @@ function RoadRowItem({ row, variant }: { row: RoadRow; variant: 'condensed' | 'f
   const deltaClass = row.delta > 0 ? 'text-gain' : row.delta < 0 ? 'text-loss' : 'text-muted-foreground'
 
   return (
-    <div className="flex items-center gap-3 py-2.5 border-b border-border/50 last:border-0">
+    <div className="flex min-w-0 items-start gap-2 border-b border-border/50 py-2.5 last:border-0 sm:items-center sm:gap-3">
       <span className="size-2 rounded-full shrink-0" style={{ backgroundColor: color }} />
       <span className="text-sm font-medium min-w-0 flex-1 truncate" title={platformLabel(row.platform)}>
         {platformLabel(row.platform)}
@@ -97,11 +97,12 @@ function RoadRowItem({ row, variant }: { row: RoadRow; variant: 'condensed' | 'f
        *  for dot + sparkline + value + delta + a readable label — the label
        *  is the one thing that can't be dropped, so the sparkline goes
        *  instead. The `full` variant (Allocation's own section) keeps it. */}
-      {variant === 'full' && <MiniSpark values={row.values} color={color} />}
-      <span className="text-sm font-semibold tabular-nums text-right min-w-[92px]">
+      {variant === 'full' && <span className="hidden shrink-0 sm:block"><MiniSpark values={row.values} color={color} /></span>}
+      <div className="flex shrink-0 flex-col items-end gap-0.5 sm:flex-row sm:items-center sm:gap-3">
+      <span className="text-sm font-semibold tabular-nums text-right whitespace-nowrap sm:min-w-[92px]">
         {masked ? MASK_TEXT : formatInrCompact(row.current)}
       </span>
-      <span className={cn('flex items-center gap-1 text-xs font-medium tabular-nums justify-end min-w-[84px]', deltaClass)}>
+      <span className={cn('flex items-center gap-1 text-xs font-medium tabular-nums justify-end whitespace-nowrap sm:min-w-[84px]', deltaClass)}>
         <Icon className="size-3 shrink-0" />
         {masked
           ? MASK_TEXT
@@ -109,6 +110,7 @@ function RoadRowItem({ row, variant }: { row: RoadRow; variant: 'condensed' | 'f
             ? '—'
             : `${row.delta > 0 ? '+' : ''}${formatInrCompact(row.delta)}`}
       </span>
+      </div>
     </div>
   )
 }

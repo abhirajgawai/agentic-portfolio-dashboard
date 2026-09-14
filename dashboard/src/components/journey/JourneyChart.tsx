@@ -23,7 +23,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { useGoalsData } from "@/lib/data"
-import { formatInrCompact, platformLabel } from "@/lib/format"
+import { formatInr, platformLabel } from "@/lib/format"
 import { usePrivacy } from "@/lib/privacy"
 import { useTheme } from "@/lib/theme"
 import type { History } from "@/types/contract"
@@ -88,9 +88,9 @@ export function JourneyChart({ history }: { history: History }) {
     ? `Net worth over time by platform, ${sliced.dates.length} data points${
         firstDate && lastDate ? ` from ${formatShortDate(firstDate)} to ${formatShortDate(lastDate)}` : ""
       }`
-    : `Net worth over time by platform, from ${formatInrCompact(firstValue)} on ${
+    : `Net worth over time by platform, from ${formatInr(firstValue)} on ${
         firstDate ? formatShortDate(firstDate) : "—"
-      } to ${formatInrCompact(lastValue)} on ${lastDate ? formatShortDate(lastDate) : "—"}`
+      } to ${formatInr(lastValue)} on ${lastDate ? formatShortDate(lastDate) : "—"}`
 
   const visibleGoals = useMemo(() => {
     if (sliced.total.length === 0) return []
@@ -106,7 +106,7 @@ export function JourneyChart({ history }: { history: History }) {
           { name: "Net worth", data: sliced.total, area: true },
           ...sliced.platforms.map((p) => ({ name: platformLabel(p.id), data: p.data })),
         ],
-        formatter: formatInrCompact,
+        formatter: formatInr,
         masked,
         showLabels: sliced.dates.length <= LABEL_MAX_POINTS,
         // Positional, not a colorIndex lookup — sliced.platforms is already
@@ -116,7 +116,7 @@ export function JourneyChart({ history }: { history: History }) {
         colors: [resolveThemeColor("--chart-journey", "#B8823D"), ...getChartPalette()],
         goalLines: visibleGoals.map((g) => ({
           value: g.targetAmount,
-          label: masked ? "Goal" : `Goal: ${formatInrCompact(g.targetAmount)}`,
+          label: masked ? "Goal" : `Goal: ${formatInr(g.targetAmount)}`,
         })),
       }),
     // resolvedTheme isn't read directly, but resolveThemeColor()/getChartPalette()
@@ -133,7 +133,7 @@ export function JourneyChart({ history }: { history: History }) {
     return dayChangeBarOption({
       dates: sliced.dates.slice(1),
       changes,
-      formatter: formatInrCompact,
+      formatter: formatInr,
       masked,
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps

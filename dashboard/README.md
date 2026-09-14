@@ -75,7 +75,7 @@ Order matters — the dashboard is a static viewer plus a thin bridge:
 | 5173 | Vite dev server (dashboard) |
 | 8000 | FastAPI bridge (loopback) |
 | 4096 | `opencode serve` (M7 agent) |
-| 8787 | Zerodha session daemon (pipeline) |
+| 8788 | Zerodha session daemon (pipeline) |
 | 11111 | Moomoo OpenD gateway (pipeline) |
 
 ## Contract

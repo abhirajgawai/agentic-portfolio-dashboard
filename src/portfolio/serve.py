@@ -36,7 +36,7 @@ from portfolio.tokens import zerodha_login
 
 logger = logging.getLogger("portfolio.serve")
 
-DEFAULT_PORT = 8787
+DEFAULT_PORT = 8788
 HEARTBEAT_SECONDS = 45
 
 

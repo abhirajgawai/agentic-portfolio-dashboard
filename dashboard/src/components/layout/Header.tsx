@@ -20,7 +20,7 @@ const REFRESH_DONE_TIMEOUT_MS = 4000
 
 /** Primary pill tabs in the Ledger Gold nav — Properties + Groww/Sharekhan Data
  *  move into ManageMenu instead (design brief §3). */
-const PRIMARY_WORKSPACE_IDS: WorkspaceId[] = ['journey', 'allocation', 'portfolio', 'alerts']
+const PRIMARY_WORKSPACE_IDS: WorkspaceId[] = ['journey', 'allocation', 'portfolio', 'groww-sharekhan']
 
 function truncateDetail(detail: string, maxLen = 160): string {
   const compact = detail.split('\n').slice(0, 2).join(' · ').trim()
@@ -124,7 +124,7 @@ export function Header({
         </div>
       </nav>
 
-      {/* ==== MANAGE MENU (Properties, Groww/Sharekhan Data) ==== */}
+      {/* ==== MANAGE MENU (Alerts, Properties, Groww/Sharekhan Data) ==== */}
       <ManageMenu workspace={workspace} onWorkspaceChange={onWorkspaceChange} />
 
       {/* ==== DIVIDER ==== */}

@@ -45,18 +45,20 @@ function TopMoversSection({ perf }: { perf: ReturnType<typeof usePerformance>['d
         return (
           <div
             key={`${m.platform}:${m.ticker}`}
-            className={`flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors ${
+            className={`flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 rounded-md px-2 py-1.5 text-sm transition-colors sm:flex-nowrap ${
               isGain ? 'bg-gain/10 text-gain' : 'bg-loss/10 text-loss'
             }`}
           >
-            <span className="font-medium truncate min-w-0">{m.ticker}</span>
-            <span className="text-xs text-muted-foreground ml-auto whitespace-nowrap">
+            <div className="flex min-w-0 flex-1 items-center gap-1.5">
+              <span className="min-w-0 shrink truncate font-medium">{m.ticker}</span>
+              <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground" title={m.name ?? m.platform} aria-label={m.name ?? m.platform}>
               {m.name ? `${m.name} · ` : ''}{m.platform}
             </span>
-            <span className="font-mono tabular-nums whitespace-nowrap">
+            </div>
+            <span className="shrink-0 font-mono tabular-nums whitespace-nowrap">
               {isGain ? '+' : ''}{formatPct(dayPnlPct)}
             </span>
-            <span className="font-mono tabular-nums whitespace-nowrap text-xs">
+            <span className="shrink-0 font-mono tabular-nums whitespace-nowrap text-xs">
               ({isGain ? '+' : ''}{dayPnlDisplay})
             </span>
           </div>
@@ -70,7 +72,7 @@ function TopMoversSection({ perf }: { perf: ReturnType<typeof usePerformance>['d
       {gainers.length > 0 && (
         <Card className="shadow-sm">
           <CardHeader className="pb-1">
-            <CardTitle className="flex items-center gap-1.5 text-gain">
+            <CardTitle className="flex items-center gap-1.5 text-gain" role="heading" aria-level={2}>
               <svg className="size-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M18 15l-6-6-6 6" />
               </svg>
@@ -83,7 +85,7 @@ function TopMoversSection({ perf }: { perf: ReturnType<typeof usePerformance>['d
       {losers.length > 0 && (
         <Card className="shadow-sm">
           <CardHeader className="pb-1">
-            <CardTitle className="flex items-center gap-1.5 text-loss">
+            <CardTitle className="flex items-center gap-1.5 text-loss" role="heading" aria-level={2}>
               <svg className="size-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M6 9l6 6 6-6" />
               </svg>

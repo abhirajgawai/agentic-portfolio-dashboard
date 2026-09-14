@@ -142,3 +142,15 @@ Rules of the topology:
 - Use the project agents (`.opencode/agent/`) for phase-specific work and the skills
   (`.opencode/skill/`) for phase-specific procedures. Load the matching skill before
   doing phase work.
+
+## Codex setup
+
+- Codex specialist definitions live in `.codex/agents/` and mirror the ownership table
+  above. `.codex/config.toml` disables interactive approvals for this trusted personal
+  repository; model selection remains a session/user setting.
+- For multi-part work, load `.codex/skills/project-orchestration/SKILL.md` before
+  delegating. The `.opencode/skill/orchestration/` copy remains the OpenCode workflow.
+- Do not infer milestone status from `README.md` or a skill summary. Re-read the current
+  `PLAN.md` markers and verify the repository because those summaries can lag behind.
+- Codex is a development collaborator for this repository. OpenCode remains the M7
+  runtime used by the application itself.

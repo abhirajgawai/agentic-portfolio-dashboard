@@ -49,7 +49,7 @@ function AlertRow({ alert }: { alert: Alert }) {
         }
       />
       <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
           <span className="font-mono text-xs text-muted-foreground">{alert.ruleId}</span>
           <Badge variant={SEVERITY_BADGE[alert.severity]} className="capitalize">
             {alert.severity}
@@ -74,7 +74,7 @@ function FreshnessRow({ bucket }: { bucket: StalenessBucket }) {
         <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-gain" />
       )}
       <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
           <span className="text-sm font-medium">{bucket.label}</span>
           <Badge variant={bucket.stale ? 'warning' : 'success'}>
             {bucket.stale ? 'Stale' : 'Fresh'}
@@ -158,7 +158,7 @@ function FiredAlertsSection() {
         <CardTitle className="text-xs text-muted-foreground">
           Fired alerts · evaluated {formatAsOfLong(alerts.data.generatedAt)}
         </CardTitle>
-        <div className="flex gap-1.5">
+        <div className="flex flex-wrap gap-1.5">
           {bySeverity.critical > 0 && (
             <Badge variant="danger">{bySeverity.critical} critical</Badge>
           )}
@@ -189,7 +189,7 @@ function FiredAlertsSection() {
 
 export function AlertsScreen() {
   return (
-    <div className="space-y-4">
+    <div className="min-w-0 space-y-4">
       <PageHeader
         title="Alerts"
         subtitle="Everything that needs your attention — stale data sources, plus rule evaluation results from the last export (thresholds, ops, severities live in data/rules.yaml)."

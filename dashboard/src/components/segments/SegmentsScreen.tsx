@@ -233,7 +233,7 @@ function SegmentsGrid({
     }.`
 
   return (
-    <div className="space-y-4">
+    <div className="min-w-0 space-y-4">
       <h1 className="sr-only">Segments</h1>
       {/* Final-state announcement only (aria-live=polite; no chatter per keystroke) */}
       <div role="status" aria-live="polite" className="sr-only">
@@ -252,7 +252,7 @@ function SegmentsGrid({
       </Entrance>
 
       {/* The three component segments */}
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+       <div className="grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-3">
         {(['us', 'india', 'cas'] as const).map((id, i) => {
           const seg = data.byId[id]
           if (!seg) return null
@@ -292,12 +292,12 @@ function SegmentsGrid({
 
 function SegmentsSkeleton() {
   return (
-    <div className="space-y-4" role="status" aria-label="Loading segments…">
+    <div className="min-w-0 space-y-4" role="status" aria-label="Loading segments…">
       <div className="h-28 rounded-lg border bg-card p-5">
         <div className="h-3 w-28 animate-pulse rounded bg-muted" />
         <div className="mt-3 h-7 w-44 animate-pulse rounded bg-muted" />
       </div>
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+       <div className="grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-3">
         {Array.from({ length: 3 }, (_, i) => (
           <div key={i} className="h-40 rounded-lg border bg-card p-4">
             <div className="h-3 w-24 animate-pulse rounded bg-muted" />

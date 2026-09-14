@@ -20,6 +20,7 @@ from portfolio import __version__
 from portfolio.agent.client import DEFAULT_BASE_URL
 from portfolio.db.migrate import migrate
 from portfolio.logging import setup_logging
+from portfolio.serve import DEFAULT_PORT
 
 app = typer.Typer(
     name="portfolio",
@@ -93,7 +94,7 @@ def db_truncate(
 @app.command("serve")
 def serve(
     platform: Annotated[str, typer.Option(help="zerodha (only platform in M1)")] = "zerodha",
-    port: Annotated[int, typer.Option(help="loopback RPC port")] = 8787,
+    port: Annotated[int, typer.Option(help="loopback RPC port")] = DEFAULT_PORT,
     gate: Annotated[bool, typer.Option(
         help="exit 0 quietly when today is not an IN trading day (scheduled daemon start)"
     )] = False,

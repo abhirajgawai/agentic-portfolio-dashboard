@@ -197,7 +197,7 @@ export function PropertiesScreen() {
   const totalReturnPct = totalCost > 0 ? (totalGain / totalCost) * 100 : 0
 
   return (
-    <div className="space-y-4">
+    <div className="min-w-0 space-y-4">
       <PageHeader
         title="Real Estate"
         subtitle="Manage property holdings — add new or update valuations"
@@ -210,7 +210,7 @@ export function PropertiesScreen() {
       />
 
       {/* Summary Cards */}
-      <div className="grid gap-4 sm:grid-cols-3">
+       <div className="grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-3">
         <Card>
           <CardHeader className="pb-1">
             <CardTitle className="text-xs text-muted-foreground">Total Value</CardTitle>
@@ -286,7 +286,7 @@ export function PropertiesScreen() {
                     </div>
                   </div>
                 </div>
-                <div className="flex shrink-0 items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2 sm:shrink-0">
                   <Button
                     variant="outline"
                     size="sm"
@@ -297,7 +297,7 @@ export function PropertiesScreen() {
                     <span className="hidden sm:inline">Update</span>
                   </Button>
                   {deleteConfirm === prop.property_id ? (
-                    <div className="flex items-center gap-1">
+                    <div className="flex flex-wrap items-center gap-1">
                       <Button
                         variant="destructive"
                         size="sm"
@@ -330,7 +330,7 @@ export function PropertiesScreen() {
                 </div>
               </CardHeader>
               <CardContent>
-                <div className="grid gap-4 sm:grid-cols-3">
+                 <div className="grid gap-4 lg:grid-cols-3">
                   <div>
                     <div className="text-xs text-muted-foreground">Current Value</div>
                     <div className="mt-1 text-base font-semibold tabular-nums">

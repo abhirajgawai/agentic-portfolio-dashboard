@@ -1,7 +1,7 @@
 /**
- * src/components/layout/ManageMenu.tsx — Secondary nav dropdown for the two
- * data-entry workspaces (Properties, Groww/Sharekhan Data) that don't get a
- * primary pill tab in the Ledger Gold nav restructure (design brief §3).
+ * src/components/layout/ManageMenu.tsx — Secondary nav dropdown for Alerts and
+ * the two data-entry workspaces (Properties, Groww/Sharekhan Data) that do
+ * not get a primary pill tab in the Ledger Gold navigation.
  * Icon-button trigger sized to match the other action-cluster buttons in
  * Header.tsx (Refresh/Chat/Privacy — `Button variant="ghost" size="sm"`).
  */
@@ -18,7 +18,7 @@ import {
 import { cn } from '@/lib/utils'
 import { WORKSPACES, type WorkspaceId } from '@/lib/workspaces'
 
-const MANAGE_WORKSPACE_IDS: WorkspaceId[] = ['properties', 'groww-sharekhan']
+const MANAGE_WORKSPACE_IDS: WorkspaceId[] = ['alerts', 'properties']
 
 export function ManageMenu({
   workspace,
@@ -43,8 +43,8 @@ export function ManageMenu({
               ? 'text-foreground bg-accent/50'
               : 'text-muted-foreground hover:text-foreground',
           )}
-          aria-label="Manage data sources"
-          title="Manage: Properties, Groww/Sharekhan Data"
+          aria-label="Manage workspaces"
+          title="Manage: Alerts, Properties"
         >
           <LayoutGrid className="size-3.5" />
           <span className="hidden sm:inline">Manage</span>
@@ -56,6 +56,7 @@ export function ManageMenu({
             key={w.id}
             onSelect={() => onWorkspaceChange(w.id)}
             className={cn(workspace === w.id && 'bg-accent text-accent-foreground')}
+            aria-current={workspace === w.id ? 'page' : undefined}
           >
             {w.label}
           </DropdownMenuItem>

@@ -108,7 +108,7 @@ research trail.
 
 ```
 portfolio db migrate                  apply pending SQL migrations (versioned)
-portfolio serve --platform zerodha    hold the day's session, serve read-only RPC (:8787)
+portfolio serve --platform zerodha    hold the day's session, serve read-only RPC (:8788)
 portfolio auth --platform moomoo      verify OpenD, store trade password, test read access
 portfolio snapshot --platform <zerodha|moomoo|all> [--eod]
 portfolio trades [--platform zerodha|moomoo|all]    daily trade + funds capture (XIRR input)

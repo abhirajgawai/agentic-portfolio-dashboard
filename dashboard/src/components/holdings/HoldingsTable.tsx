@@ -482,7 +482,7 @@ const HoldingsTableInner = memo(function HoldingsTableInner({
           <span className="min-w-0 truncate text-xs text-muted-foreground">
             {rows.length} holding{rows.length === 1 ? '' : 's'}
           </span>
-          <div className="flex items-center gap-2">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
             {enableGrouping && (
               <Toggle
                 variant="outline"
@@ -508,8 +508,15 @@ const HoldingsTableInner = memo(function HoldingsTableInner({
           </div>
         </div>
       )}
-      <div className="max-h-[70vh] overflow-auto">
-        <table className="w-full table-fixed text-left text-sm">
+      <p className="px-3 pt-2 text-xs text-muted-foreground sm:hidden">Scroll table →</p>
+      <div
+        data-testid="holdings-table-scroll"
+        className="max-h-[70vh] overflow-auto"
+        role="region"
+        aria-label="Holdings table"
+        tabIndex={0}
+      >
+        <table className="min-w-[48rem] table-fixed text-left text-sm">
           <colgroup>
             {(table.getHeaderGroups()[0]?.headers ?? []).map((header) => (
               <col

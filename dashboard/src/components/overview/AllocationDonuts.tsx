@@ -17,11 +17,11 @@
  *  can't resolve `var(--chart-N)` the way the legend's HTML dots can.
  */
 
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 import { EChart } from '@/components/charts/EChart'
 import { categoryValueBarsOption, donutOption, getChartPalette, resolveThemeColor } from '@/components/charts/options'
-import { formatInrCompact, platformLabel } from '@/lib/format'
+import { formatInr, formatInrCompact, platformLabel } from '@/lib/format'
 import { usePrivacy } from '@/lib/privacy'
 import { useTheme } from '@/lib/theme'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -32,6 +32,21 @@ import type { Allocation, Latest } from '@/types/contract'
  *  alongside the display `name` so a color resolver can key off the stable
  *  raw value even after `name` has been through platformLabel() or similar. */
 type NameValue = { name: string; value: number; id: string }
+
+function useCompactChartLabels() {
+  const query = '(max-width: 639px)'
+  const [compact, setCompact] = useState(() => typeof window !== 'undefined' && window.matchMedia(query).matches)
+
+  useEffect(() => {
+    const media = window.matchMedia(query)
+    const update = () => setCompact(media.matches)
+    update()
+    media.addEventListener('change', update)
+    return () => media.removeEventListener('change', update)
+  }, [])
+
+  return compact
+}
 
 /** Raw allocation record -> { name, value, id } sorted by value desc (today's order). */
 function toNameValue(record: Record<string, number> | undefined): NameValue[] {
@@ -106,7 +121,7 @@ function BreakdownCard({
 
   return (
     <Card
-      className="donut-enter flex flex-col shadow-sm"
+      className="donut-enter flex min-w-0 flex-col shadow-sm"
       style={{ animationDelay: `${index * 80}ms` }}
     >
       <CardHeader className="pb-1">
@@ -118,7 +133,7 @@ function BreakdownCard({
             No allocation data
           </div>
         ) : (
-          <div className="flex items-center gap-3">
+          <div className="flex min-w-0 items-center gap-3">
             {/* The ring — the at-a-glance shape of the whole. Exact numbers
                 live in the legend beside it, never color-alone. */}
             <div
@@ -146,7 +161,7 @@ function BreakdownCard({
                   <span className="min-w-0 flex-1 truncate text-muted-foreground" title={d.name}>
                     {d.name}
                   </span>
-                  <span className="font-medium tabular-nums">{d.value.toFixed(1)}%</span>
+                  <span className="shrink-0 whitespace-nowrap font-medium tabular-nums">{d.value.toFixed(1)}%</span>
                 </li>
               ))}
             </ul>
@@ -165,6 +180,7 @@ function BreakdownCard({
 function PlatformBreakdownBars({ holdings }: { holdings: Latest['holdings'] }) {
   const { masked } = usePrivacy()
   const { resolvedTheme } = useTheme()
+  const compactLabels = useCompactChartLabels()
 
   const rows = useMemo(
     () =>
@@ -186,22 +202,24 @@ function PlatformBreakdownBars({ holdings }: { holdings: Latest['holdings'] }) {
       values: rows.map((r) => r.value),
       colors: rows.map((r) => palette[PLATFORM_CHART_INDEX[r.platform] ?? 0] ?? palette[0] ?? '#6f7cff'),
       formatter: (v) => formatInrCompact(v),
+      tooltipFormatter: (v) => formatInr(v),
+      compactLabels,
       masked,
     })
     // resolvedTheme forces a re-paint on theme toggle — see the comment on
     // BreakdownCard's option memo above.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, masked, resolvedTheme])
+  }, [rows, masked, resolvedTheme, compactLabels])
 
   return (
-    <Card className="donut-enter shadow-sm" style={{ animationDelay: '240ms' }}>
+    <Card className="donut-enter min-w-0 shadow-sm" style={{ animationDelay: '240ms' }}>
       <CardHeader className="pb-1">
         <CardTitle className="text-sm font-semibold">Platform breakdown</CardTitle>
         <p className="text-[11px] text-muted-foreground">
           Current value by platform (base INR) — the ₹ amounts behind the "By platform" %
         </p>
       </CardHeader>
-      <CardContent>
+      <CardContent className="min-w-0">
         {rows.length === 0 ? (
           <div className="flex h-20 items-center justify-center text-xs text-muted-foreground">
             No holdings yet

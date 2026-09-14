@@ -186,7 +186,7 @@ function CasScheduleCard() {
                 <span>Next due: {formatWhen(schedule.nextDueAt)}</span>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <Label htmlFor="cas_interval" className="text-xs whitespace-nowrap">
                   Every
                 </Label>
@@ -214,7 +214,7 @@ function CasScheduleCard() {
                 <Button
                   size="sm"
                   variant={schedule.enabled ? 'outline' : 'secondary'}
-                  className="h-8 text-xs ml-auto"
+                  className="h-8 text-xs sm:ml-auto"
                   disabled={updateMutation.isPending}
                   onClick={() => updateMutation.mutate({ enabled: !schedule.enabled })}
                 >
@@ -278,7 +278,7 @@ export function CasImportScreen() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="min-w-0 space-y-6">
       {/* Header */}
       <div>
         <h2 className="text-lg font-semibold">CAS Import</h2>

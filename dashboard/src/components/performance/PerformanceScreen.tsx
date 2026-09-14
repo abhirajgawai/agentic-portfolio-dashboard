@@ -282,8 +282,8 @@ function MoversTable({ movers }: { movers: PerformanceMover[] }) {
     return <p className="text-xs text-muted-foreground">No top movers recorded for this day.</p>
   }
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-left text-sm">
+    <div className="overflow-x-auto" role="region" aria-label="Top movers table" tabIndex={0}>
+      <table className="min-w-[42rem] text-left text-sm">
         <thead>
           <tr className="border-b bg-muted/40">
             <th className="px-3 py-2 text-xs font-medium text-muted-foreground">Ticker</th>
@@ -372,7 +372,7 @@ function AttributionPanel({
           value={selected.date}
           onChange={(e) => onSelectDate(e.target.value)}
           aria-label="Select day"
-          className="h-8 rounded-md border border-input bg-background px-2 text-xs text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring sm:w-auto"
         >
           {[...daily]
             .reverse()
@@ -384,7 +384,7 @@ function AttributionPanel({
         </select>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+         <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
           {dimensionOptions.map((dim) => (
             <div key={dim.key}>
               <p className="mb-1 text-[11px] font-medium text-muted-foreground">{dim.label}</p>
@@ -486,8 +486,8 @@ function DailyTable({
           Daily performance · {daily.length} day{daily.length === 1 ? '' : 's'} — click a row to inspect
         </span>
       </div>
-      <div className="overflow-x-auto">
-        <table className="w-full text-left text-sm">
+      <div className="overflow-x-auto" role="region" aria-label="Daily performance table" tabIndex={0}>
+        <table className="min-w-[48rem] text-left text-sm">
           <thead>
             <tr className="border-b bg-muted/40">
               <th className="px-3 py-2 text-xs font-medium text-muted-foreground">Date</th>
@@ -591,7 +591,7 @@ function PerformanceBody({ perf }: { perf: Performance }) {
 
   if (!latest) {
     return (
-      <div className="space-y-4">
+      <div className="min-w-0 space-y-4">
         <HeaderCards latest={null} xirr={perf.xirr} />
         <EmptyState
           icon={TrendingUp}
@@ -607,7 +607,7 @@ function PerformanceBody({ perf }: { perf: Performance }) {
   const selected = selectedDate ? (daily.find((d) => d.date === selectedDate) ?? latest) : latest
 
   return (
-    <div className="space-y-4">
+    <div className="min-w-0 space-y-4">
       <HeaderCards latest={latest} xirr={perf.xirr} />
       <DualAxisChart daily={daily} masked={masked} />
       <SimpleReturnChart daily={daily} />

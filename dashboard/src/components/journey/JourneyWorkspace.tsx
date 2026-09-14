@@ -28,7 +28,6 @@ import { LiveJobsRow } from "@/components/journey/LiveJobsRow";
 import { MilestoneJournal } from "@/components/journey/MilestoneJournal";
 import { StalenessBanner } from "@/components/journey/StalenessBanner";
 import { TodayPanel } from "@/components/journey/TodayPanel";
-import { YearStrip } from "@/components/journey/YearStrip";
 import { useAnimatedNumber } from "@/components/journey/animation";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -62,7 +61,7 @@ function Headline({ latest, masked }: { latest: Latest; masked: boolean }) {
   const animatedTotal = useAnimatedNumber(latest.totals.valueBase);
 
   return (
-    <div>
+    <div className="min-w-0">
       <p className="text-xs text-muted-foreground">Net worth</p>
       <p className="font-headline mt-1 text-4xl tabular-nums text-foreground sm:text-5xl">
         {masked ? MASK_TEXT : formatInrCompact(animatedTotal)}
@@ -141,7 +140,7 @@ export function JourneyWorkspace({
 
   return (
     <motion.section
-      className="space-y-4"
+      className="min-w-0 space-y-4"
       variants={container}
       initial={reduced ? "show" : "hidden"}
       animate="show"
@@ -150,7 +149,7 @@ export function JourneyWorkspace({
 
       {/* Hero: net-worth headline + live-sync pill chips + staleness chip */}
       <motion.div variants={item} className="space-y-3">
-        <div className="flex flex-wrap items-end justify-between gap-4">
+        <div className="flex min-w-0 flex-wrap items-end justify-between gap-4">
           <Headline latest={latest.data} masked={masked} />
           <LiveJobsRow />
         </div>
@@ -172,13 +171,12 @@ export function JourneyWorkspace({
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
         <motion.div variants={item} className="min-w-0 flex-1 space-y-4">
           <JourneyChart history={history.data} />
-          <YearStrip history={history.data} />
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <GoalMilestones valueBase={latest.data.totals.valueBase} />
             <MilestoneJournal history={history.data} />
           </div>
         </motion.div>
-        <motion.div variants={item} className="space-y-4 lg:w-[340px] lg:shrink-0">
+        <motion.div variants={item} className="min-w-0 space-y-4 lg:w-[340px] lg:shrink-0">
           <TodayPanel latest={latest.data} alerts={alerts.data} />
           <AccountRoads history={history.data} variant="condensed" />
         </motion.div>

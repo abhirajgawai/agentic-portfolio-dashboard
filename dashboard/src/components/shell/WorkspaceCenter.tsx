@@ -38,7 +38,7 @@ export function WorkspaceCenter({ workspace, setTransientDossier, onWorkspaceCha
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-1 flex-col bg-background min-w-0">
+    <div className="flex h-full min-h-0 min-w-0 max-w-full flex-1 flex-col bg-background">
       {/* Breadcrumb when a dossier is open */}
       {breadcrumb && (
         <div className="flex items-center gap-2 border-b border-border/30 px-4 py-1.5 text-sm text-muted-foreground">
@@ -56,7 +56,7 @@ export function WorkspaceCenter({ workspace, setTransientDossier, onWorkspaceCha
       )}
 
       {/* Active workspace content */}
-      <div className="min-h-0 flex-1 overflow-y-auto p-4">
+      <div className="min-h-0 min-w-0 max-w-full flex-1 overflow-y-auto p-3 sm:p-4">
         {workspace === 'journey' && (
           <JourneyWorkspace
             latest={latest.data}

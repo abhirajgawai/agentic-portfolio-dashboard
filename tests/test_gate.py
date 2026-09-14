@@ -398,7 +398,7 @@ def test_serve_gate_skips_on_in_holiday(monkeypatch, capsys) -> None:
 
     import portfolio.serve as serve_mod
 
-    monkeypatch.setattr(serve_mod, "run", lambda port=8787: runs.append(port))
+    monkeypatch.setattr(serve_mod, "run", lambda port=8788: runs.append(port))
 
     cli_mod.serve(platform="zerodha", gate=True)  # must not raise
 
@@ -415,9 +415,9 @@ def test_serve_gate_runs_on_in_trading_day(monkeypatch, capsys) -> None:
 
     import portfolio.serve as serve_mod
 
-    monkeypatch.setattr(serve_mod, "run", lambda port=8787: runs.append(port))
+    monkeypatch.setattr(serve_mod, "run", lambda port=8788: runs.append(port))
 
     cli_mod.serve(platform="zerodha", gate=True)
 
-    assert runs == [8787]
+    assert runs == [8788]
     assert "starting zerodha session daemon" in capsys.readouterr().out

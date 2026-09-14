@@ -458,10 +458,15 @@ export function categoryValueBarsOption(opts: {
   values: number[]
   colors: string[]
   formatter?: (value: number) => string
+  /** Exact-value formatter for the hover tooltip when chart labels are compact. */
+  tooltipFormatter?: (value: number) => string
+  /** Reduces persistent chart chrome for narrow containers; hover stays exact. */
+  compactLabels?: boolean
   masked?: boolean
 }): EChartsOption {
   const fmt = opts.formatter ?? ((v: number) => String(v))
   const valueFmt = (v: number) => (opts.masked ? MASK_TEXT : fmt(v))
+  const tooltipValueFmt = (v: number) => (opts.masked ? MASK_TEXT : (opts.tooltipFormatter ?? fmt)(v))
   return {
     backgroundColor: 'transparent',
     textStyle: { color: chartText(), fontFamily: 'inherit' },
@@ -469,12 +474,16 @@ export function categoryValueBarsOption(opts: {
       trigger: 'axis',
       axisPointer: { type: 'shadow' },
       ...tooltipTheme(),
-      valueFormatter: (v: unknown) => valueFmt(typeof v === 'number' ? v : 0),
+      valueFormatter: (v: unknown) => tooltipValueFmt(typeof v === 'number' ? v : 0),
     },
-    grid: { left: 8, right: 56, top: 8, bottom: 8, containLabel: true },
+    grid: { left: 8, right: opts.compactLabels ? 12 : 56, top: 8, bottom: 8, containLabel: true },
     xAxis: {
       type: 'value',
-      axisLabel: { color: chartText(), fontSize: 11, formatter: (v: number) => valueFmt(v) },
+      axisLabel: {
+        color: chartText(),
+        fontSize: opts.compactLabels ? 10 : 11,
+        formatter: (v: number) => valueFmt(v),
+      },
       splitLine: { lineStyle: { color: axisLine() } },
     },
     yAxis: {
@@ -493,7 +502,7 @@ export function categoryValueBarsOption(opts: {
           itemStyle: { color: opts.colors[i % opts.colors.length], borderRadius: 3 },
         })),
         barMaxWidth: 22,
-        label: opts.masked
+        label: opts.masked || opts.compactLabels
           ? { show: false }
           : {
               show: true,

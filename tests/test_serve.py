@@ -62,6 +62,19 @@ def test_run_proceeds_when_port_is_quiet(monkeypatch: pytest.MonkeyPatch) -> Non
     assert calls == ["_run"]
 
 
+def test_run_defaults_to_port_reserved_for_zerodha(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The daemon's default must not reclaim Headroom's fixed port 8787."""
+    calls: list[tuple[str, int]] = []
+
+    async def _run(host: str, port: int) -> None:
+        calls.append((host, port))
+
+    monkeypatch.setattr(serve, "_run", _run)
+    serve.run()
+
+    assert calls == [("127.0.0.1", 8788)]
+
+
 def test_run_proceeds_when_daemon_unhealthy(monkeypatch: pytest.MonkeyPatch) -> None:
     """A process answering but reporting ok:false must NOT block a fresh daemon."""
     srv = _fake_daemon({"ok": False, "auth": False, "detail": "connection lost"})

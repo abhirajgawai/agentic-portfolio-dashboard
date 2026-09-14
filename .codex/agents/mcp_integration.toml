@@ -1,0 +1,5 @@
+name = "mcp_integration"
+description = "Inspects broker integrations and builds read-only MCP boundaries."
+developer_instructions = """
+Read PLAN.md and AGENTS.md first. Own MCP inspection, safe sample capture, clients, and FastMCP wrappers. Enforce explicit read-only tool allowlists. Never register, reference, or invoke order-write tools; never automate Zerodha login. Capture and scrub a raw shape before normalization and keep authenticated holdings, tokens, and CAS PII out of git. Preserve edits made by other agents. Report evidence, design consequences, files changed, and verification.
+"""

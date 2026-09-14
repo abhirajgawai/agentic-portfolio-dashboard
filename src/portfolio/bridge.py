@@ -124,7 +124,7 @@ def _exports_generated_at() -> str | None:
 
 
 def _zerodha_daemon_health() -> dict:
-    """Live Zerodha session-daemon reachability (GET :8787/health, ~3s
+    """Live Zerodha session-daemon reachability (GET :8788/health, ~3s
     timeout) - reuses snapshot.daemon_health() so the bridge's UI signal and
     the pipeline's own daemon-readiness check never drift apart. Moomoo has no
     equivalent: it's OpenD (a local desktop app) + a per-run MCP subprocess,

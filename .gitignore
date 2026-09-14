@@ -91,3 +91,5 @@ docs/design/spec-allocation-donuts/
 
 # ---- opencode node_modules (its own .gitignore also covers this) ----
 .opencode/node_modules/
+
+graphify-out

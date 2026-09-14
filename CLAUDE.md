@@ -16,6 +16,18 @@ There is also an `AGENTS.md` (OpenCode-specific: orchestrator/subagent topology 
 tool-agnostic and binding regardless of which agent runs**; the multi-agent
 orchestration topology itself only applies when working via OpenCode.
 
+## Knowledge graph (`graphify-out/`)
+
+A pre-built graphify knowledge graph of this repo lives in `graphify-out/graph.json`
+(2500+ nodes, code + docs, with a `GRAPH_REPORT.md` audit trail). Reach for it — via
+`/graphify query "<question>"` — for cross-cutting or architectural questions that
+would otherwise require reading many files to piece together (e.g. "why do these two
+agent definitions overlap," "what's the blast radius of changing `Settings`," "how did
+the Journey redesign evolve across rounds"). It is **not** consulted automatically and
+is not a substitute for Grep/Glob/git on routine "find this function" or "what changed"
+tasks — use those directly. After a batch of changes, `/graphify --update` refreshes it
+incrementally (only changed files, not a full rebuild).
+
 ## Non-negotiable guardrails
 
 1. **Read-only broker access.** Every broker MCP client (`src/portfolio/clients/`)

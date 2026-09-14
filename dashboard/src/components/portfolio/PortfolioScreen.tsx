@@ -231,7 +231,7 @@ function SegmentSelector({ value, onChange, segments }: SegmentSelectorProps) {
   ]
 
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex min-w-0 flex-wrap items-center gap-2">
       <label htmlFor="segment-select" className="text-xs text-muted-foreground">
         Segment
       </label>
@@ -354,7 +354,7 @@ function PortfolioScreenInner({
   }
 
   return (
-    <div className="space-y-4">
+    <div className="min-w-0 space-y-4">
       <h1 className="sr-only">Portfolio</h1>
       {/* Final-state announcement only (aria-live=polite) */}
       <div role="status" aria-live="polite" className="sr-only">
@@ -385,7 +385,7 @@ function PortfolioScreenInner({
         />
       </Entrance>
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+      <div className="grid min-w-0 grid-cols-1 gap-4 md:grid-cols-2">
         {(['us', 'india'] as const).map((id, i) => {
           const seg = data.byId[id]
           if (!seg) return null
@@ -410,7 +410,7 @@ function PortfolioScreenInner({
       </Entrance>
 
       {/* Segment Selector + Clear Filter */}
-      <div className="flex items-center justify-between">
+      <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
         <SegmentSelector value={selectedSegmentId} onChange={selectSegment} segments={data.segments} />
         {(selectedSegmentId !== 'consolidated' || activeBucketId) && (
           <Button variant="outline" size="sm" onClick={handleClearFilter}>
